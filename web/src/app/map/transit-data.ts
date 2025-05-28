@@ -106,7 +106,7 @@ export const ROUTES: Route[] = [
       { name: "Summerhill",      coords: [-79.3910, 43.6827] },
       { name: "St Clair",        coords: [-79.3933, 43.6881] },
       { name: "Davisville",      coords: [-79.3971, 43.6977] },
-      { name: "Eglinton",        coords: [-79.3986, 43.7056] },
+      { name: "Eglinton",        coords: [-79.398765, 43.706380] },
       { name: "Lawrence",        coords: [-79.4024, 43.7259] },
       { name: "York Mills",      coords: [-79.4061, 43.7438] },
       { name: "Sheppard–Yonge",  coords: [-79.4108, 43.7610] },
@@ -151,7 +151,7 @@ export const ROUTES: Route[] = [
       [-79.3910, 43.6827], // Summerhill
       [-79.3933, 43.6881], // St Clair
       [-79.3971, 43.6977], // Davisville
-      [-79.3986, 43.7056], // Eglinton
+      [-79.398765, 43.706380], // Eglinton
       [-79.4024, 43.7259], // Lawrence
       [-79.4061, 43.7438], // York Mills
       [-79.4108, 43.7610], // Sheppard–Yonge
