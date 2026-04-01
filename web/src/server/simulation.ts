@@ -277,6 +277,16 @@ interface LegRouteResult {
 export interface ProposedLineStop { name: string; coords: [number, number] }
 export interface ProposedLine { name: string; type: string; stops: ProposedLineStop[] }
 
+export interface TransitSpeedData {
+  speeds: Record<Route["type"], number>;
+  boardingPenalties: Record<Route["type"], number>;
+  liveHeadways: Record<Route["type"], number | null>;
+  isLive: boolean;
+  source: "live" | "fallback";
+  updatedAt: number;
+  tripCount: number;
+}
+
 export interface SimulationResult {
   hasProposedLines: boolean;
   agentCount: number;
