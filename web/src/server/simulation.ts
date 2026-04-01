@@ -386,7 +386,11 @@ function carTravelMin(originLon: number, originLat: number, destLon: number, des
 
 // ── Graph construction ────────────────────────────────────────────────────────
 
-function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<number, GraphStop> } {
+function buildGraph(
+  extra: ProposedLine[] = [],
+  speeds: Record<string, number> = SPEED,
+  penalties: Record<string, number> = BOARD_PENALTY,
+): { graph: Graph; stops: Map<number, GraphStop> } {
   const stopMap = new Map<number, GraphStop>();
   const graph: Graph = new Map();
   let nextId = 1;
@@ -421,8 +425,8 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
   ];
 
   for (const route of allRoutes) {
-    const speed   = SPEED[route.type] ?? 22;
-    const penalty = BOARD_PENALTY[route.type] ?? 4;
+    const speed   = speeds[route.type] ?? 22;
+    const penalty = penalties[route.type] ?? 4;
     const ids: number[] = route.stops.map((s) =>
       getOrAddStop(s.name, s.coords[0], s.coords[1], route.id, route.type)
     );
@@ -472,8 +476,8 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
 
   let virtualId = -1;
   for (const line of extra) {
-    const speed   = (SPEED as Record<string, number>)[line.type] ?? 22;
-    const penalty = (BOARD_PENALTY as Record<string, number>)[line.type] ?? 4;
+    const speed   = speeds[line.type] ?? 22;
+    const penalty = penalties[line.type] ?? 4;
     let prevId: number | null = null;
 
     for (const stop of line.stops) {
