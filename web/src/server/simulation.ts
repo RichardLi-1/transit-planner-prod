@@ -1004,12 +1004,16 @@ export async function runSimulation(opts: {
   agentCount: number;
   seed: number;
   timeRange: { startMin: number; endMin: number };
+  transitSpeeds?: TransitSpeedData;
 }): Promise<SimulationResult> {
   const t0 = Date.now();
   const hasProposed = opts.proposed.length > 0;
 
-  const { graph: baseGraph, stops: baseStops } = buildGraph([]);
-  const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed) : { graph: baseGraph, stops: baseStops };
+  const effectiveSpeeds   = opts.transitSpeeds?.speeds    ?? SPEED;
+  const effectivePenalties = opts.transitSpeeds?.boardingPenalties ?? BOARD_PENALTY;
+
+  const { graph: baseGraph, stops: baseStops } = buildGraph([], effectiveSpeeds, effectivePenalties);
+  const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed, effectiveSpeeds, effectivePenalties) : { graph: baseGraph, stops: baseStops };
 
   const dayProfile = generateDayProfile(opts.seed);
   const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 10_000)), opts.seed, dayProfile);
