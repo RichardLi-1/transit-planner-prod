@@ -1,7 +1,7 @@
 import "server-only";
 import { type NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { runSimulation, type SimulationResult, type StressSegment } from "~/server/simulation";
+import { runSimulation, type SimulationResult, type StressSegment, type TransitSpeedData } from "~/server/simulation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -116,6 +116,8 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
       path_coords: p.pathCoords,
     })),
     narrative,
+    transit_speed_source: r.transitSpeedSource,
+    transit_updated_at:   r.transitUpdatedAt,
     graph_stats: {
       baseline_nodes: r.graphStats.nodes,
       baseline_edges: r.graphStats.edges,
@@ -135,6 +137,7 @@ export async function POST(req: NextRequest) {
     seed?: number;
     narrate?: boolean;
     time_range?: { start_min: number; end_min: number };
+    transit_speeds?: TransitSpeedData;
   };
 
   try {
@@ -150,6 +153,7 @@ export async function POST(req: NextRequest) {
       agentCount: body.agent_count ?? 500,
       seed: body.seed ?? 42,
       timeRange: { startMin: tr.start_min, endMin: tr.end_min },
+      transitSpeeds: body.transit_speeds,
     });
 
     const narrative =
