@@ -327,13 +327,15 @@ function TimeRangeSlider({
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
 export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }: SimulationPanelProps) {
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [result, setResult]       = useState<SimulationResult | null>(null);
-  const [agentCount, setAgentCount] = useState(500);
-  const [startMin, setStartMin]   = useState(360);   // 6:00am
-  const [endMin, setEndMin]       = useState(1440);  // midnight
-  const [activeTab, setActiveTab] = useState<"overview" | "equity" | "stress" | "narrative">("overview");
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const [result, setResult]           = useState<SimulationResult | null>(null);
+  const [agentCount, setAgentCount]   = useState(500);
+  const [startMin, setStartMin]       = useState(360);   // 6:00am
+  const [endMin, setEndMin]           = useState(1440);  // midnight
+  const [activeTab, setActiveTab]     = useState<"overview" | "equity" | "stress" | "narrative">("overview");
+  const [speedsFetching, setSpeedsFetching] = useState(false);
+  const [transitSpeeds, setTransitSpeeds]   = useState<TransitSpeedData | null>(null);
 
   const hasProposed = customRoutes.length > 0;
   const scenarioName = hasProposed
