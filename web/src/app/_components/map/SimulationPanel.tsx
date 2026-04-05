@@ -7,6 +7,16 @@ import type { Route } from "~/app/map/transit-data";
 
 type IncomeBreakdown = Record<string, number>;
 
+interface TransitSpeedData {
+  speeds: Record<string, number>;
+  boardingPenalties: Record<string, number>;
+  liveHeadways: Record<string, number | null>;
+  isLive: boolean;
+  source: "live" | "fallback";
+  updatedAt: number;
+  tripCount: number;
+}
+
 interface RunStats {
   pct_accessible: number;
   avg_transit_time_min: number;
@@ -82,6 +92,8 @@ export interface SimulationResult {
     scenario_nodes: number;
     scenario_edges: number;
   };
+  transit_speed_source?: "live" | "fallback";
+  transit_updated_at?: number | null;
 }
 
 export interface SimulationPanelProps {
