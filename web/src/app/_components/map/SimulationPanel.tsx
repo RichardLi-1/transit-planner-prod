@@ -379,6 +379,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
           scenario_name: scenarioName,
           narrate: hasProposed,
           time_range: { start_min: startMin, end_min: endMin },
+          transit_speeds: speeds ?? undefined,
         }),
       });
 
