@@ -352,6 +352,23 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
       stops: r.stops.map((s) => ({ name: s.name, coords: s.coords })),
     }));
 
+    // Pre-fetch live TTC speeds; fail silently and fall back to defaults
+    let speeds: TransitSpeedData | null = null;
+    try {
+      setSpeedsFetching(true);
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 4000);
+      const r    = await fetch(
+        `/api/transit-speeds?start_min=${startMin}&end_min=${endMin}`,
+        { signal: ctrl.signal },
+      );
+      clearTimeout(tid);
+      if (r.ok) speeds = (await r.json()) as TransitSpeedData;
+    } catch { /* silent fallback */ } finally {
+      setSpeedsFetching(false);
+      setTransitSpeeds(speeds);
+    }
+
     try {
       const res = await fetch("/api/simulation", {
         method: "POST",
