@@ -566,6 +566,22 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                   {fmtMin(result.time_range.start_min)}–{fmtMin(result.time_range.end_min)} · {result.per_agent.length.toLocaleString()} legs · {result.animated_agent_count.toLocaleString()} animated / {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s
                 </p>
 
+                {/* Live speed data indicator */}
+                {result.transit_speed_source && (
+                  <div className="flex items-center gap-1.5 text-[10px] justify-center">
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        result.transit_speed_source === "live" ? "bg-emerald-500" : "bg-stone-300"
+                      }`}
+                    />
+                    <span className="text-stone-400">
+                      {result.transit_speed_source === "live"
+                        ? `Live TTC speeds · ${new Date(result.transit_updated_at!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : "Default speeds"}
+                    </span>
+                  </div>
+                )}
+
                 <button
                   onClick={() => onAnimate(result.per_agent.filter((p) => p.path_coords.length > 0))}
                   className="w-full rounded-xl py-2 text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 active:scale-[0.98] transition-all"
