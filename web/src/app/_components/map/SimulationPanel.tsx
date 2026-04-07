@@ -495,7 +495,9 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
           {loading && (
             <div className="space-y-1">
               <p className="text-xs text-stone-500">
-                Building transit graph + routing {agentCount.toLocaleString()} agents…
+                {speedsFetching
+                  ? "Fetching live TTC data…"
+                  : `Building transit graph + routing ${agentCount.toLocaleString()} agents…`}
               </p>
               <div className="h-1 rounded-full bg-stone-100 overflow-hidden">
                 <div className="h-full bg-violet-400 rounded-full animate-pulse" style={{ width: "60%" }} />
