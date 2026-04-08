@@ -335,7 +335,6 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
   const [endMin, setEndMin]           = useState(1440);  // midnight
   const [activeTab, setActiveTab]     = useState<"overview" | "equity" | "stress" | "narrative">("overview");
   const [speedsFetching, setSpeedsFetching] = useState(false);
-  const [transitSpeeds, setTransitSpeeds]   = useState<TransitSpeedData | null>(null);
 
   const hasProposed = customRoutes.length > 0;
   const scenarioName = hasProposed
@@ -366,7 +365,6 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
       if (r.ok) speeds = (await r.json()) as TransitSpeedData;
     } catch { /* silent fallback */ } finally {
       setSpeedsFetching(false);
-      setTransitSpeeds(speeds);
     }
 
     try {
