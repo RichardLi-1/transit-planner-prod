@@ -575,8 +575,8 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                       }`}
                     />
                     <span className="text-stone-400">
-                      {result.transit_speed_source === "live"
-                        ? `Live TTC speeds · ${new Date(result.transit_updated_at!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                      {result.transit_speed_source === "live" && result.transit_updated_at != null
+                        ? `Live TTC speeds · ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
                         : "Default speeds"}
                     </span>
                   </div>
