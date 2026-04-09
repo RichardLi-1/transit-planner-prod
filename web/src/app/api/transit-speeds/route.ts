@@ -7,7 +7,7 @@ const TTC_TRIP_UPDATES_URL = "https://bustime.ttc.ca/gtfsrt/tripupdates";
 
 // TTC GTFS route ID → simulation route type
 const SUBWAY_IDS    = new Set(["1", "2", "4"]);
-const STREETCAR_IDS = new Set(["501", "503", "504", "505", "506", "509", "510", "511", "512"]);
+const STREETCAR_IDS = new Set(["501", "503", "504", "505", "506", "509", "510", "511", "512", "514"]);
 // LRT not yet operating in GTFS-RT (Finch West / Eglinton not open)
 // All other numeric IDs → bus
 
