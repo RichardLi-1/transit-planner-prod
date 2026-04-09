@@ -129,9 +129,15 @@ function computeSpeedData(
   };
   let tripCount = 0;
 
+  const seen = new Set<string>();
   for (const entity of feed.entity) {
     const trip = entity.tripUpdate?.trip;
     if (!trip?.routeId || !trip.startTime) continue;
+
+    // Deduplicate: same trip can appear multiple times in GTFS-RT feeds
+    const tripKey = `${trip.routeId}|${trip.tripId ?? ""}|${trip.startTime}`;
+    if (seen.has(tripKey)) continue;
+    seen.add(tripKey);
 
     const type = routeTypeForId(trip.routeId);
     if (!type) continue;
@@ -153,7 +159,12 @@ function computeSpeedData(
     const times = buckets[type].sort((a, b) => a - b);
     if (times.length < 3) continue;
     const gaps: number[] = [];
-    for (let i = 1; i < times.length; i++) gaps.push(times[i]! - times[i - 1]!);
+    for (let i = 1; i < times.length; i++) {
+      const g = times[i]! - times[i - 1]!;
+      // Exclude gaps > 60 min — likely service gaps between runs, not true headways
+      if (g > 0 && g <= 60) gaps.push(g);
+    }
+    if (gaps.length < 2) continue;
     gaps.sort((a, b) => a - b);
     liveHeadways[type] = gaps[Math.floor(gaps.length / 2)]!;
   }
