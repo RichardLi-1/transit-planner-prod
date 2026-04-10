@@ -17,6 +17,7 @@ export interface TransitSpeedData {
   speeds:            Record<RouteType, number>;
   boardingPenalties: Record<RouteType, number>;
   liveHeadways:      Record<RouteType, number | null>;
+  routeCounts:       Record<RouteType, number>;
   isLive:            boolean;
   source:            "live" | "fallback";
   updatedAt:         number;
@@ -54,6 +55,7 @@ function buildFallback(): TransitSpeedData {
     speeds:            { ...FALLBACK_SPEEDS },
     boardingPenalties: { ...FALLBACK_PENALTIES },
     liveHeadways:      { subway: null, lrt: null, streetcar: null, bus: null, go_train: null },
+    routeCounts:       { subway: 0,    lrt: 0,    streetcar: 0,    bus: 0,    go_train: 0 },
     isLive:            false,
     source:            "fallback",
     updatedAt:         Date.now(),
@@ -185,10 +187,15 @@ function computeSpeedData(
     }
   }
 
+  const routeCounts = Object.fromEntries(
+    (Object.keys(buckets) as RouteType[]).map((t) => [t, buckets[t].length]),
+  ) as Record<RouteType, number>;
+
   return {
     speeds,
     boardingPenalties,
     liveHeadways,
+    routeCounts,
     isLive:    tripCount > 0,
     source:    tripCount > 0 ? "live" : "fallback",
     updatedAt: Date.now(),

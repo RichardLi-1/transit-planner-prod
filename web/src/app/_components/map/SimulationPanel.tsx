@@ -11,6 +11,7 @@ interface TransitSpeedData {
   speeds: Record<string, number>;
   boardingPenalties: Record<string, number>;
   liveHeadways: Record<string, number | null>;
+  routeCounts: Record<string, number>;
   isLive: boolean;
   source: "live" | "fallback";
   updatedAt: number;
