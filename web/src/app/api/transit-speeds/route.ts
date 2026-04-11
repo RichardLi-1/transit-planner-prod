@@ -191,13 +191,17 @@ function computeSpeedData(
     (Object.keys(buckets) as RouteType[]).map((t) => [t, buckets[t].length]),
   ) as Record<RouteType, number>;
 
+  // Require at least 10 trips across all types before reporting as "live"
+  // to avoid spurious live labels during off-peak hours with very sparse data
+  const isLive = tripCount >= 10;
+
   return {
     speeds,
     boardingPenalties,
     liveHeadways,
     routeCounts,
-    isLive:    tripCount > 0,
-    source:    tripCount > 0 ? "live" : "fallback",
+    isLive,
+    source:    isLive ? "live" : "fallback",
     updatedAt: Date.now(),
     tripCount,
   };
