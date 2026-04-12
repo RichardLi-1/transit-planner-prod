@@ -74,13 +74,17 @@ export async function GET(req: NextRequest): Promise<NextResponse<TransitSpeedDa
       headers: { Accept: "application/x-google-protobuf" },
     });
 
-    if (!res.ok) return NextResponse.json(buildFallback());
+    if (!res.ok) {
+      console.warn(`[transit-speeds] GTFS-RT returned ${res.status}, using fallback`);
+      return NextResponse.json(buildFallback());
+    }
 
     const buffer = await res.arrayBuffer();
     const feed   = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
 
     return NextResponse.json(computeSpeedData(feed, startMin, endMin));
-  } catch {
+  } catch (err) {
+    console.warn("[transit-speeds] fetch/decode error, using fallback:", err);
     return NextResponse.json(buildFallback());
   }
 }
