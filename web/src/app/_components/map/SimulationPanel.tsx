@@ -364,7 +364,12 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
       );
       clearTimeout(tid);
       if (r.ok) speeds = (await r.json()) as TransitSpeedData;
-    } catch { /* silent fallback */ } finally {
+    } catch (err) {
+      // AbortError is expected on timeout — suppress; log anything unexpected
+      if (err instanceof Error && err.name !== "AbortError") {
+        console.warn("[transit-speeds] pre-fetch failed:", err.message);
+      }
+    } finally {
       setSpeedsFetching(false);
     }
 
