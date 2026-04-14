@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { Route } from "~/app/map/transit-data";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -337,6 +337,8 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
   const [endMin, setEndMin]           = useState(1440);  // midnight
   const [activeTab, setActiveTab]     = useState<"overview" | "equity" | "stress" | "narrative">("overview");
   const [speedsFetching, setSpeedsFetching] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   const hasProposed = customRoutes.length > 0;
   const scenarioName = hasProposed
@@ -371,7 +373,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
         console.warn("[transit-speeds] pre-fetch failed:", err.message);
       }
     } finally {
-      setSpeedsFetching(false);
+      if (mountedRef.current) setSpeedsFetching(false);
     }
 
     try {
