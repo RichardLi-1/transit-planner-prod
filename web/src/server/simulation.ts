@@ -72,6 +72,7 @@ const DOWNTOWN_LAT =  43.649;
 
 // ── Transit speeds ────────────────────────────────────────────────────────────
 
+// These defaults are mirrored in web/src/app/api/transit-speeds/route.ts — keep in sync.
 const SPEED: Record<Route["type"], number> = {
   subway:    35,
   lrt:       25,
@@ -80,6 +81,7 @@ const SPEED: Record<Route["type"], number> = {
   go_train:  60,
 };
 
+// Half-headway model: penalty = min(headway/2, cap). These match transit-speeds fallbacks.
 const BOARD_PENALTY: Record<Route["type"], number> = {
   subway:    2,
   lrt:       2.5,
