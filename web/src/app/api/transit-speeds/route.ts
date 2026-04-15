@@ -111,13 +111,13 @@ function parseStartTime(t: string): number {
  * Subway/LRT/GO are grade-separated — multiplier is always 1.0 for those.
  */
 function roadSpeedMultiplier(midpointMin: number): number {
-  if (midpointMin <  360) return 1.10; // overnight: less congestion
-  if (midpointMin <  420) return 0.95; // early AM ramp
+  if (midpointMin <  360) return 1.10; // overnight (midnight–6am): minimal congestion
+  if (midpointMin <  420) return 0.95; // early AM ramp (6–7am)
   if (midpointMin <  570) return 0.75; // AM peak (7–9:30am)
-  if (midpointMin <  840) return 0.90; // midday
-  if (midpointMin <  990) return 0.85; // afternoon shoulder
-  if (midpointMin < 1140) return 0.72; // PM peak (4:30–7pm)
-  return 0.90;                          // evening
+  if (midpointMin <  870) return 0.90; // midday (9:30am–2:30pm)
+  if (midpointMin <  930) return 0.85; // pre-PM shoulder (2:30–3:30pm)
+  if (midpointMin < 1110) return 0.72; // PM peak (3:30–6:30pm)
+  return 0.88;                          // evening (6:30pm–midnight)
 }
 
 function computeSpeedData(
