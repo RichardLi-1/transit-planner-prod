@@ -576,11 +576,16 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                 {/* Live speed data indicator */}
                 {result.transit_speed_source && (
                   <div className="flex items-center gap-1.5 text-[10px] justify-center">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        result.transit_speed_source === "live" ? "bg-emerald-500" : "bg-stone-300"
-                      }`}
-                    />
+                    <span className="relative flex h-1.5 w-1.5">
+                      {result.transit_speed_source === "live" && (
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      )}
+                      <span
+                        className={`relative inline-flex h-1.5 w-1.5 rounded-full ${
+                          result.transit_speed_source === "live" ? "bg-emerald-500" : "bg-stone-300"
+                        }`}
+                      />
+                    </span>
                     <span className="text-stone-400">
                       {result.transit_speed_source === "live" && result.transit_updated_at != null
                         ? `Live TTC speeds · ${result.transit_trip_count ?? 0} trips · ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
