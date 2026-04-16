@@ -70,7 +70,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<TransitSpeedDa
 
   try {
     const res = await fetch(TTC_TRIP_UPDATES_URL, {
-      next: { revalidate: 300 },
+      next: { revalidate: 300, tags: ["gtfs-rt-trip-updates"] },
       headers: { Accept: "application/x-google-protobuf" },
     });
 
