@@ -1023,7 +1023,13 @@ export async function runSimulation(opts: {
       return [t, v != null && v >= 1 && v <= 200 ? v : SPEED[t]];
     }),
   );
-  const effectivePenalties = opts.transitSpeeds?.boardingPenalties ?? BOARD_PENALTY;
+  const livePenalties = opts.transitSpeeds?.boardingPenalties;
+  const effectivePenalties: Record<string, number> = Object.fromEntries(
+    (Object.keys(BOARD_PENALTY) as (keyof typeof BOARD_PENALTY)[]).map((t) => {
+      const v = livePenalties?.[t];
+      return [t, v != null && v >= 0 && v <= 30 ? v : BOARD_PENALTY[t]];
+    }),
+  );
 
   const { graph: baseGraph, stops: baseStops } = buildGraph([], effectiveSpeeds, effectivePenalties);
   const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed, effectiveSpeeds, effectivePenalties) : { graph: baseGraph, stops: baseStops };
