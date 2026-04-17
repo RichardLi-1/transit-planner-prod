@@ -1015,7 +1015,14 @@ export async function runSimulation(opts: {
   const t0 = Date.now();
   const hasProposed = opts.proposed.length > 0;
 
-  const effectiveSpeeds   = opts.transitSpeeds?.speeds    ?? SPEED;
+  // Validate incoming live speeds: fall back per-type if a value is implausible
+  const liveSpeeds = opts.transitSpeeds?.speeds;
+  const effectiveSpeeds: Record<string, number> = Object.fromEntries(
+    (Object.keys(SPEED) as (keyof typeof SPEED)[]).map((t) => {
+      const v = liveSpeeds?.[t];
+      return [t, v != null && v >= 1 && v <= 200 ? v : SPEED[t]];
+    }),
+  );
   const effectivePenalties = opts.transitSpeeds?.boardingPenalties ?? BOARD_PENALTY;
 
   const { graph: baseGraph, stops: baseStops } = buildGraph([], effectiveSpeeds, effectivePenalties);
