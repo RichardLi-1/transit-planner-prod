@@ -1015,15 +1015,22 @@ export async function runSimulation(opts: {
   const t0 = Date.now();
   const hasProposed = opts.proposed.length > 0;
 
+  // Discard live speeds if the client sent data older than 10 minutes
+  const tenMinMs = 10 * 60 * 1000;
+  const speedsAreStale =
+    opts.transitSpeeds?.updatedAt != null &&
+    Date.now() - opts.transitSpeeds.updatedAt > tenMinMs;
+  const resolvedSpeeds = speedsAreStale ? undefined : opts.transitSpeeds;
+
   // Validate incoming live speeds: fall back per-type if a value is implausible
-  const liveSpeeds = opts.transitSpeeds?.speeds;
+  const liveSpeeds = resolvedSpeeds?.speeds;
   const effectiveSpeeds: Record<string, number> = Object.fromEntries(
     (Object.keys(SPEED) as (keyof typeof SPEED)[]).map((t) => {
       const v = liveSpeeds?.[t];
       return [t, v != null && v >= 1 && v <= 200 ? v : SPEED[t]];
     }),
   );
-  const livePenalties = opts.transitSpeeds?.boardingPenalties;
+  const livePenalties = resolvedSpeeds?.boardingPenalties;
   const effectivePenalties: Record<string, number> = Object.fromEntries(
     (Object.keys(BOARD_PENALTY) as (keyof typeof BOARD_PENALTY)[]).map((t) => {
       const v = livePenalties?.[t];
@@ -1109,8 +1116,8 @@ export async function runSimulation(opts: {
     baselineEdgeStress: existingStress,
     perAgent,
     graphStats: { nodes: baseStops.size, edges: [...baseGraph.values()].reduce((n, es) => n + es.length, 0) },
-    transitSpeedSource: opts.transitSpeeds?.source    ?? "fallback",
-    transitUpdatedAt:   opts.transitSpeeds?.updatedAt ?? null,
-    transitTripCount:   opts.transitSpeeds?.tripCount ?? 0,
+    transitSpeedSource: resolvedSpeeds?.source    ?? "fallback",
+    transitUpdatedAt:   resolvedSpeeds?.updatedAt ?? null,
+    transitTripCount:   resolvedSpeeds?.tripCount ?? 0,
   };
 }
