@@ -65,8 +65,9 @@ function buildFallback(): TransitSpeedData {
 
 export async function GET(req: NextRequest): Promise<NextResponse<TransitSpeedData>> {
   const { searchParams } = req.nextUrl;
-  const startMin = Math.max(0, Math.min(1440, parseInt(searchParams.get("start_min") ?? "0",   10) || 0));
-  const endMin   = Math.max(0, Math.min(1440, parseInt(searchParams.get("end_min")   ?? "1440", 10) || 1440));
+  let startMin = Math.max(0, Math.min(1440, parseInt(searchParams.get("start_min") ?? "0",   10) || 0));
+  let endMin   = Math.max(0, Math.min(1440, parseInt(searchParams.get("end_min")   ?? "1440", 10) || 1440));
+  if (startMin > endMin) [startMin, endMin] = [endMin, startMin];
 
   try {
     const res = await fetch(TTC_TRIP_UPDATES_URL, {
