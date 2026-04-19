@@ -83,7 +83,10 @@ export async function GET(req: NextRequest): Promise<NextResponse<TransitSpeedDa
     const buffer = await res.arrayBuffer();
     const feed   = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
 
-    return NextResponse.json(computeSpeedData(feed, startMin, endMin));
+    const data = computeSpeedData(feed, startMin, endMin);
+    return NextResponse.json(data, {
+      headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" },
+    });
   } catch (err) {
     console.warn("[transit-speeds] fetch/decode error, using fallback:", err);
     return NextResponse.json(buildFallback());
