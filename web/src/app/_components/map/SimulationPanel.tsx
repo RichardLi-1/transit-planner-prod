@@ -360,7 +360,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
     try {
       setSpeedsFetching(true);
       const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 4000);
+      const tid  = setTimeout(() => ctrl.abort(), 3000);
       const r    = await fetch(
         `/api/transit-speeds?start_min=${startMin}&end_min=${endMin}`,
         { signal: ctrl.signal },
