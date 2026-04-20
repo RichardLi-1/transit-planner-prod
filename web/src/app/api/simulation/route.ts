@@ -122,8 +122,8 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
     graph_stats: {
       baseline_nodes: r.graphStats.nodes,
       baseline_edges: r.graphStats.edges,
-      scenario_nodes: r.graphStats.nodes,
-      scenario_edges: r.graphStats.edges,
+      scenario_nodes: r.graphStats.scenarioNodes,
+      scenario_edges: r.graphStats.scenarioEdges,
     },
   };
 }

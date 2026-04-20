@@ -304,7 +304,7 @@ export interface SimulationResult {
   lineStress: StressSegment[];
   baselineEdgeStress: StressSegment[];
   perAgent: PerAgentDelta[];
-  graphStats: { nodes: number; edges: number };
+  graphStats: { nodes: number; edges: number; scenarioNodes: number; scenarioEdges: number };
   transitSpeedSource: "live" | "fallback";
   transitUpdatedAt:   number | null;
   transitTripCount:   number;
@@ -1116,7 +1116,12 @@ export async function runSimulation(opts: {
     lineStress:         proposedStress,
     baselineEdgeStress: existingStress,
     perAgent,
-    graphStats: { nodes: baseStops.size, edges: [...baseGraph.values()].reduce((n, es) => n + es.length, 0) },
+    graphStats: {
+      nodes:         baseStops.size,
+      edges:         [...baseGraph.values()].reduce((n, es) => n + es.length, 0),
+      scenarioNodes: scenStops.size,
+      scenarioEdges: [...scenGraph.values()].reduce((n, es) => n + es.length, 0),
+    },
     transitSpeedSource: resolvedSpeeds?.source    ?? "fallback",
     transitUpdatedAt:   resolvedSpeeds?.updatedAt ?? null,
     transitTripCount:   resolvedSpeeds?.tripCount ?? 0,
