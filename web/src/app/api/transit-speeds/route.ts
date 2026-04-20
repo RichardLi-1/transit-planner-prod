@@ -18,6 +18,7 @@ export interface TransitSpeedData {
   boardingPenalties: Record<RouteType, number>;
   liveHeadways:      Record<RouteType, number | null>;
   routeCounts:       Record<RouteType, number>;
+  roadMultiplier:    number;
   isLive:            boolean;
   source:            "live" | "fallback";
   updatedAt:         number;
@@ -56,6 +57,7 @@ function buildFallback(): TransitSpeedData {
     boardingPenalties: { ...FALLBACK_PENALTIES },
     liveHeadways:      { subway: null, lrt: null, streetcar: null, bus: null, go_train: null },
     routeCounts:       { subway: 0,    lrt: 0,    streetcar: 0,    bus: 0,    go_train: 0 },
+    roadMultiplier:    1.0,
     isLive:            false,
     source:            "fallback",
     updatedAt:         Date.now(),
@@ -208,6 +210,7 @@ function computeSpeedData(
     boardingPenalties,
     liveHeadways,
     routeCounts,
+    roadMultiplier: roadMult,
     isLive,
     source:    isLive ? "live" : "fallback",
     updatedAt: Date.now(),

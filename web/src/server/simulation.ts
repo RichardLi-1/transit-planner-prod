@@ -284,6 +284,7 @@ export interface TransitSpeedData {
   boardingPenalties: Record<Route["type"], number>;
   liveHeadways: Record<Route["type"], number | null>;
   routeCounts: Record<Route["type"], number>;
+  roadMultiplier: number;
   isLive: boolean;
   source: "live" | "fallback";
   updatedAt: number;
