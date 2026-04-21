@@ -508,7 +508,10 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                   : `Building transit graph + routing ${agentCount.toLocaleString()} agents…`}
               </p>
               <div className="h-1 rounded-full bg-stone-100 overflow-hidden">
-                <div className="h-full bg-violet-400 rounded-full animate-pulse" style={{ width: "60%" }} />
+                <div
+                  className="h-full bg-violet-400 rounded-full transition-all duration-700"
+                  style={{ width: speedsFetching ? "20%" : "70%", animation: "pulse 1.5s ease-in-out infinite" }}
+                />
               </div>
             </div>
           )}
