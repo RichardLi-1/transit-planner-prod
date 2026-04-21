@@ -116,9 +116,10 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
       path_coords: p.pathCoords,
     })),
     narrative,
-    transit_speed_source: r.transitSpeedSource,
-    transit_updated_at:   r.transitUpdatedAt,
-    transit_trip_count:   r.transitTripCount,
+    transit_speed_source:    r.transitSpeedSource,
+    transit_updated_at:      r.transitUpdatedAt,
+    transit_trip_count:      r.transitTripCount,
+    transit_road_multiplier: r.transitRoadMultiplier,
     graph_stats: {
       baseline_nodes: r.graphStats.nodes,
       baseline_edges: r.graphStats.edges,
