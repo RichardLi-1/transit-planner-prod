@@ -94,9 +94,10 @@ export interface SimulationResult {
     scenario_nodes: number;
     scenario_edges: number;
   };
-  transit_speed_source?: "live" | "fallback";
-  transit_updated_at?:   number | null;
-  transit_trip_count?:   number;
+  transit_speed_source?:    "live" | "fallback";
+  transit_updated_at?:      number | null;
+  transit_trip_count?:      number;
+  transit_road_multiplier?: number;
 }
 
 export interface SimulationPanelProps {
@@ -592,7 +593,13 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                     </span>
                     <span className="text-stone-400">
                       {result.transit_speed_source === "live" && result.transit_updated_at != null
-                        ? `Live TTC speeds · ${result.transit_trip_count ?? 0} trips · ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        ? [
+                            `Live TTC speeds · ${result.transit_trip_count ?? 0} trips`,
+                            result.transit_road_multiplier != null && result.transit_road_multiplier !== 1.0
+                              ? `· road ×${result.transit_road_multiplier.toFixed(2)}`
+                              : null,
+                            `· ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+                          ].filter(Boolean).join(" ")
                         : "Default speeds (live fetch unavailable)"}
                     </span>
                   </div>
