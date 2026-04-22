@@ -126,6 +126,20 @@ function roadSpeedMultiplier(midpointMin: number): number {
   return 0.88;                          // evening (6:30pm–midnight)
 }
 
+/** Returns the median inter-trip gap in minutes, or null if too few valid gaps. */
+function medianHeadway(startMinutes: number[]): number | null {
+  if (startMinutes.length < 3) return null;
+  const sorted = [...startMinutes].sort((a, b) => a - b);
+  const gaps: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const g = sorted[i]! - sorted[i - 1]!;
+    if (g > 0 && g <= 60) gaps.push(g);
+  }
+  if (gaps.length < 2) return null;
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)]!;
+}
+
 function computeSpeedData(
   feed: transit_realtime.FeedMessage,
   startMin: number,
@@ -168,17 +182,8 @@ function computeSpeedData(
   };
 
   for (const type of Object.keys(buckets) as RouteType[]) {
-    const times = buckets[type].sort((a, b) => a - b);
-    if (times.length < 3) continue;
-    const gaps: number[] = [];
-    for (let i = 1; i < times.length; i++) {
-      const g = times[i]! - times[i - 1]!;
-      // Exclude gaps > 60 min — likely service gaps between runs, not true headways
-      if (g > 0 && g <= 60) gaps.push(g);
-    }
-    if (gaps.length < 2) continue;
-    gaps.sort((a, b) => a - b);
-    liveHeadways[type] = gaps[Math.floor(gaps.length / 2)]!;
+    const hw = medianHeadway(buckets[type]);
+    if (hw !== null) liveHeadways[type] = hw;
   }
 
   // Build speeds and boarding penalties
