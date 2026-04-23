@@ -1022,7 +1022,11 @@ export async function runSimulation(opts: {
   const speedsAreStale =
     opts.transitSpeeds?.updatedAt != null &&
     Date.now() - opts.transitSpeeds.updatedAt > tenMinMs;
-  const resolvedSpeeds = speedsAreStale ? undefined : opts.transitSpeeds;
+  // Only apply live speeds when they're fresh and from a live source
+  const resolvedSpeeds =
+    !speedsAreStale && opts.transitSpeeds?.source === "live"
+      ? opts.transitSpeeds
+      : undefined;
 
   // Validate incoming live speeds: fall back per-type if a value is implausible
   const liveSpeeds = resolvedSpeeds?.speeds;
