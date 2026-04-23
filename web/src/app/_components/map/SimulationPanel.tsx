@@ -596,7 +596,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                         ? [
                             `Live TTC speeds · ${result.transit_trip_count ?? 0} trips`,
                             result.transit_road_multiplier != null && result.transit_road_multiplier !== 1.0
-                              ? `· road ×${result.transit_road_multiplier.toFixed(2)}`
+                              ? `· road ${Math.round(result.transit_road_multiplier * 100)}% speed`
                               : null,
                             `· ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
                           ].filter(Boolean).join(" ")
