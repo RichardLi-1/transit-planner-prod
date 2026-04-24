@@ -99,6 +99,7 @@ export interface SimulationResult {
   transit_updated_at?:      number | null;
   transit_trip_count?:      number;
   transit_road_multiplier?: number;
+  transit_time_period?:     string;
 }
 
 export interface SimulationPanelProps {

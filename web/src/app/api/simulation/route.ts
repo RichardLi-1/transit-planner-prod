@@ -120,6 +120,7 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
     transit_updated_at:      r.transitUpdatedAt,
     transit_trip_count:      r.transitTripCount,
     transit_road_multiplier: r.transitRoadMultiplier,
+    transit_time_period:     r.transitTimePeriod,
     graph_stats: {
       baseline_nodes: r.graphStats.nodes,
       baseline_edges: r.graphStats.edges,
