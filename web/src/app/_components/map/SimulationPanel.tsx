@@ -13,6 +13,7 @@ interface TransitSpeedData {
   liveHeadways: Record<string, number | null>;
   routeCounts: Record<string, number>;
   roadMultiplier: number;
+  timePeriod: string;
   isLive: boolean;
   source: "live" | "fallback";
   updatedAt: number;

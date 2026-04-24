@@ -19,6 +19,7 @@ export interface TransitSpeedData {
   liveHeadways:      Record<RouteType, number | null>;
   routeCounts:       Record<RouteType, number>;
   roadMultiplier:    number;
+  timePeriod:        string;
   isLive:            boolean;
   source:            "live" | "fallback";
   updatedAt:         number;
@@ -58,6 +59,7 @@ function buildFallback(): TransitSpeedData {
     liveHeadways:      { subway: null, lrt: null, streetcar: null, bus: null, go_train: null },
     routeCounts:       { subway: 0,    lrt: 0,    streetcar: 0,    bus: 0,    go_train: 0 },
     roadMultiplier:    1.0,
+    timePeriod:        "unknown",
     isLive:            false,
     source:            "fallback",
     updatedAt:         Date.now(),
@@ -124,6 +126,16 @@ function roadSpeedMultiplier(midpointMin: number): number {
   if (midpointMin <  930) return 0.85; // pre-PM shoulder (2:30–3:30pm)
   if (midpointMin < 1110) return 0.72; // PM peak (3:30–6:30pm)
   return 0.88;                          // evening (6:30pm–midnight)
+}
+
+function timePeriodLabel(midpointMin: number): string {
+  if (midpointMin <  360) return "overnight";
+  if (midpointMin <  420) return "early morning";
+  if (midpointMin <  570) return "AM peak";
+  if (midpointMin <  870) return "midday";
+  if (midpointMin <  930) return "afternoon";
+  if (midpointMin < 1110) return "PM peak";
+  return "evening";
 }
 
 /** Returns the median inter-trip gap in minutes, or null if too few valid gaps. */
@@ -216,6 +228,7 @@ function computeSpeedData(
     liveHeadways,
     routeCounts,
     roadMultiplier: roadMult,
+    timePeriod:     isFullDay ? "full day" : timePeriodLabel(midpoint),
     isLive,
     source:    isLive ? "live" : "fallback",
     updatedAt: Date.now(),

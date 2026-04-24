@@ -285,6 +285,7 @@ export interface TransitSpeedData {
   liveHeadways: Record<Route["type"], number | null>;
   routeCounts: Record<Route["type"], number>;
   roadMultiplier: number;
+  timePeriod: string;
   isLive: boolean;
   source: "live" | "fallback";
   updatedAt: number;
