@@ -13,13 +13,21 @@ const STREETCAR_IDS = new Set(["501", "503", "504", "505", "506", "509", "510", 
 
 type RouteType = "subway" | "lrt" | "streetcar" | "bus" | "go_train";
 
+/** Live or fallback transit speed data derived from the TTC GTFS-RT feed. */
 export interface TransitSpeedData {
+  /** Operating speeds in km/h per route type, adjusted for time-of-day congestion. */
   speeds:            Record<RouteType, number>;
+  /** Expected boarding wait in minutes, derived from live headways (half-headway model). */
   boardingPenalties: Record<RouteType, number>;
+  /** Median inter-trip gap in minutes; null when fewer than 3 trips were observed. */
   liveHeadways:      Record<RouteType, number | null>;
+  /** Number of GTFS-RT trips sampled per route type in the requested window. */
   routeCounts:       Record<RouteType, number>;
+  /** Time-of-day speed multiplier applied to road-surface modes (bus/streetcar). */
   roadMultiplier:    number;
+  /** Human-readable label for the simulated time period (e.g. "AM peak"). */
   timePeriod:        string;
+  /** True when ≥10 trips were observed and speeds come from live GTFS-RT data. */
   isLive:            boolean;
   source:            "live" | "fallback";
   updatedAt:         number;
