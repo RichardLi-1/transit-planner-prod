@@ -596,12 +596,13 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                     <span className="text-stone-400">
                       {result.transit_speed_source === "live" && result.transit_updated_at != null
                         ? [
-                            `Live TTC speeds · ${result.transit_trip_count ?? 0} trips`,
+                            `Live TTC · ${result.transit_time_period ?? ""}`,
+                            `${result.transit_trip_count ?? 0} trips`,
                             result.transit_road_multiplier != null && result.transit_road_multiplier !== 1.0
-                              ? `· road ${Math.round(result.transit_road_multiplier * 100)}% speed`
+                              ? `road ${Math.round(result.transit_road_multiplier * 100)}% speed`
                               : null,
-                            `· ${new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-                          ].filter(Boolean).join(" ")
+                            new Date(result.transit_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                          ].filter(Boolean).join(" · ")
                         : "Default speeds (live fetch unavailable)"}
                     </span>
                   </div>
