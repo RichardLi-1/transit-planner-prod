@@ -43,6 +43,8 @@ export interface StressSegment {
   edge_pk?: number;
 }
 
+export type TimeWindow = "morning" | "evening" | "full_day";
+
 export interface PerAgentResult {
   home_lon: number;
   home_lat: number;
@@ -52,6 +54,8 @@ export interface PerAgentResult {
   scenario_time: number;
   time_saved_min: number;
   newly_accessible: boolean;
+  departure_min: number;
+  direction: "to_work" | "to_home";
   path_coords: [number, number][];
 }
 
@@ -60,6 +64,7 @@ export interface SimulationResult {
   agent_count: number;
   run_duration_s: number;
   has_proposed_lines: boolean;
+  time_window: TimeWindow;
   baseline: RunStats;
   scenario: RunStats;
   delta: DeltaStats;
@@ -188,11 +193,18 @@ function StressBar({ segment }: { segment: StressSegment }) {
 
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
+const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string; sub: string }[] = [
+  { value: "morning",  label: "Morning commute",  sub: "Depart 7:00–9:30am" },
+  { value: "evening",  label: "Evening commute",  sub: "Depart 4:00–6:30pm" },
+  { value: "full_day", label: "Full day",          sub: "Both peaks combined" },
+];
+
 export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }: SimulationPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [agentCount, setAgentCount] = useState(500);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("morning");
   const [activeTab, setActiveTab] = useState<"overview" | "equity" | "stress" | "narrative">("overview");
 
   const hasProposed = customRoutes.length > 0;
@@ -218,7 +230,8 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
           proposed_lines: proposedLines,
           agent_count: agentCount,
           scenario_name: scenarioName,
-          narrate: hasProposed,  // only narrate when there are proposed lines
+          narrate: hasProposed,
+          time_window: timeWindow,
         }),
       });
 
@@ -236,7 +249,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
     } finally {
       setLoading(false);
     }
-  }, [customRoutes, agentCount, scenarioName, hasProposed, onResults]);
+  }, [customRoutes, agentCount, scenarioName, hasProposed, timeWindow, onResults]);
 
   const handleClose = () => {
     onResults(null);
@@ -297,6 +310,27 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                 Shows stress on current TTC network. Draw custom lines to compare scenarios.
               </p>
             )}
+          </div>
+
+          {/* Time window selector */}
+          <div>
+            <p className="text-xs font-medium text-stone-600 mb-1.5">Time window</p>
+            <div className="grid grid-cols-3 gap-1">
+              {TIME_WINDOW_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setTimeWindow(opt.value)}
+                  className={`rounded-lg px-2 py-1.5 text-left transition-all ${
+                    timeWindow === opt.value
+                      ? "bg-violet-600 text-white"
+                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                  }`}
+                >
+                  <p className="text-[10px] font-semibold leading-tight">{opt.label}</p>
+                  <p className={`text-[9px] leading-tight mt-0.5 ${timeWindow === opt.value ? "text-violet-200" : "text-stone-400"}`}>{opt.sub}</p>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Agent count slider */}

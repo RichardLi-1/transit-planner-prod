@@ -9,7 +9,7 @@
  */
 import "server-only";
 
-import { ROUTES, BUS_ROUTES, GO_TRAIN_ROUTES } from "~/app/map/transit-data";
+import { ROUTES, BUS_ROUTES } from "~/app/map/transit-data";
 import type { Route } from "~/app/map/transit-data";
 import { supabase } from "./supabase";
 
@@ -18,6 +18,45 @@ import { supabase } from "./supabase";
 const WALK_TRANSFER_M = 400;    // max walk to transfer between lines
 const ACCESS_WALK_M   = 800;    // max walk from home/work to a stop
 const WALK_SPEED_MPS  = 5 / 3.6;
+
+// ── Time windows ──────────────────────────────────────────────────────────────
+export type TimeWindow = "morning" | "evening" | "full_day";
+
+// Peak periods (minutes from midnight):
+//   Morning peak  : 7:00–9:30am  (420–570) — transit ~45% slower, cars ~55% slower
+//   Evening peak  : 4:30–7:00pm  (990–1140)
+//   Shoulder      : 30-min ramps either side
+const PEAK_PERIODS = {
+  morningStart:  420, // 7:00am
+  morningEnd:    570, // 9:30am
+  eveningStart:  990, // 4:30pm
+  eveningEnd:   1140, // 7:00pm
+} as const;
+
+// Congestion multiplier for car travel: 1.0 = free flow, 0.5 = half speed
+function congestionMultiplierAt(departureMin: number): number {
+  const { morningStart, morningEnd, eveningStart, eveningEnd } = PEAK_PERIODS;
+  const RAMP = 30; // minutes to ramp up/down
+  const PEAK_MULT = 0.55;
+  if ((departureMin >= morningStart && departureMin <= morningEnd) ||
+      (departureMin >= eveningStart && departureMin <= eveningEnd)) return PEAK_MULT;
+  if (departureMin >= morningStart - RAMP && departureMin < morningStart)
+    return 1.0 - (1.0 - PEAK_MULT) * (departureMin - (morningStart - RAMP)) / RAMP;
+  if (departureMin > morningEnd && departureMin <= morningEnd + RAMP)
+    return PEAK_MULT + (1.0 - PEAK_MULT) * (departureMin - morningEnd) / RAMP;
+  if (departureMin >= eveningStart - RAMP && departureMin < eveningStart)
+    return 1.0 - (1.0 - PEAK_MULT) * (departureMin - (eveningStart - RAMP)) / RAMP;
+  if (departureMin > eveningEnd && departureMin <= eveningEnd + RAMP)
+    return PEAK_MULT + (1.0 - PEAK_MULT) * (departureMin - eveningEnd) / RAMP;
+  return 1.0;
+}
+
+// CLT-based normal approximation using seeded PRNG (sum of 6 uniforms)
+function sampleNormal(rand: () => number, mean: number, sd: number): number {
+  let s = 0;
+  for (let i = 0; i < 6; i++) s += rand();
+  return mean + ((s - 3) / 0.7071) * sd;
+}
 // Car speed varies by distance from downtown core:
 //   0–3 km  : ~20 km/h (matches bus speed — gridlock)
 //   3–8 km  : ~28 km/h (inner suburbs, still congested)
@@ -103,6 +142,9 @@ export interface SimAgent {
   income: "low" | "mid" | "high";
   transitDep: number;
   workCluster: string;
+  // Time fields — minutes from midnight
+  departureMin: number;   // when they leave home (AM) or work (PM)
+  direction: "to_work" | "to_home";
 }
 
 export interface TripResult {
@@ -125,6 +167,7 @@ export interface SimulationResult {
   hasProposedLines: boolean;
   agentCount: number;
   runDurationS: number;
+  timeWindow: TimeWindow;
   baseline: RunStats;
   scenario: RunStats;
   delta: DeltaStats;
@@ -173,6 +216,8 @@ interface PerAgentDelta {
   scenarioTime: number;
   timeSavedMin: number;
   newlyAccessible: boolean;
+  departureMin: number;
+  direction: "to_work" | "to_home";
   // Full coordinate path for animation [[lon,lat], ...], empty if infeasible
   pathCoords: [number, number][];
 }
@@ -248,12 +293,11 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
     });
   }
 
-  // Add all existing routes
+  // Add all existing routes — subway, LRT, streetcar, bus only (no GO Train)
   const allRoutes: Route[] = [
     ...ROUTES.filter((r) => r.type === "subway" || r.type === "lrt"),
     ...ROUTES.filter((r) => r.type === "streetcar"),
     ...BUS_ROUTES,
-    ...GO_TRAIN_ROUTES,
   ];
 
   for (const route of allRoutes) {
@@ -457,29 +501,53 @@ async function loadPopulationPoints(): Promise<{ lon: number; lat: number; weigh
   }));
 }
 
-export async function generateAgents(n: number, seed: number): Promise<SimAgent[]> {
+export async function generateAgents(n: number, seed: number, timeWindow: TimeWindow): Promise<SimAgent[]> {
   const rand = makePrng(seed);
   const popPoints = await loadPopulationPoints();
 
-  // income bands by distance from downtown (rough proxy)
   function incomeFor(lon: number, lat: number): { income: SimAgent["income"]; transitDep: number } {
-    const d = haversineM(lon, lat, -79.382, 43.649);
-    if (d < 3000)       return { income: "low",  transitDep: 0.85 + rand() * 0.1 };
-    if (d < 8000)       return { income: "mid",  transitDep: 0.5  + rand() * 0.2 };
-    if (d < 15000)      return { income: "mid",  transitDep: 0.35 + rand() * 0.2 };
+    const d = haversineM(lon, lat, DOWNTOWN_LON, DOWNTOWN_LAT);
+    if (d < 3000)  return { income: "low",  transitDep: 0.85 + rand() * 0.1 };
+    if (d < 8000)  return { income: "mid",  transitDep: 0.5  + rand() * 0.2 };
+    if (d < 15000) return { income: "mid",  transitDep: 0.35 + rand() * 0.2 };
     const r = rand();
-    if (r < 0.35)       return { income: "low",  transitDep: 0.6 + rand() * 0.15 };
-    if (r < 0.7)        return { income: "mid",  transitDep: 0.3 + rand() * 0.2 };
-    return               { income: "high", transitDep: 0.1 + rand() * 0.15 };
+    if (r < 0.35)  return { income: "low",  transitDep: 0.6  + rand() * 0.15 };
+    if (r < 0.7)   return { income: "mid",  transitDep: 0.3  + rand() * 0.2 };
+    return          { income: "high", transitDep: 0.1  + rand() * 0.15 };
   }
 
+  // Departure time sampler per window.
+  // Morning: workers must *arrive* 8:30–9:30am → depart 30–90 min before → ~7:00–9:00am
+  //          modelled as normal(mean=480, sd=25) = N(8:00am, 25 min)
+  // Evening: workers leave 4:00–6:30pm, concentrated around 5pm
+  //          modelled as normal(mean=1020, sd=30) = N(5:00pm, 30 min) then clamp to [960,1110]
+  function sampleDeparture(direction: "to_work" | "to_home"): number {
+    if (direction === "to_work") {
+      // Target arrival 8:30–9:30 → departure ~60 min earlier on average
+      return Math.round(Math.max(390, Math.min(570, sampleNormal(rand, 480, 25))));
+    } else {
+      return Math.round(Math.max(960, Math.min(1110, sampleNormal(rand, 1020, 30))));
+    }
+  }
+
+  // Split the agent pool by window
+  const morningN = timeWindow === "morning"  ? n
+                 : timeWindow === "evening"  ? 0
+                 : Math.round(n * 0.55); // full_day: ~55% morning commuters
+  const eveningN = timeWindow === "evening"  ? n
+                 : timeWindow === "morning"  ? 0
+                 : n - morningN;
+
   const agents: SimAgent[] = [];
-  for (let i = 0; i < n; i++) {
+  const total = morningN + eveningN;
+
+  for (let i = 0; i < total; i++) {
+    const direction: "to_work" | "to_home" = i < morningN ? "to_work" : "to_home";
+    const departureMin = sampleDeparture(direction);
+
     const pt = weightedChoice(popPoints, rand);
-    // Jitter radius scales with distance from downtown so suburban agents
-    // aren't all pinned to a single census cell centroid (~150m downtown, ~600m outer)
     const distFromCore = haversineM(pt.lon, pt.lat, DOWNTOWN_LON, DOWNTOWN_LAT);
-    const jitterDeg = 0.0015 + (distFromCore / 30_000) * 0.004; // ~150m–600m
+    const jitterDeg = 0.0015 + (distFromCore / 30_000) * 0.004;
     const homeLon = pt.lon + (rand() - 0.5) * jitterDeg;
     const homeLat = pt.lat + (rand() - 0.5) * jitterDeg;
     const { income, transitDep } = incomeFor(homeLon, homeLat);
@@ -487,7 +555,6 @@ export async function generateAgents(n: number, seed: number): Promise<SimAgent[
     const cluster = weightedChoice(WORK_CLUSTERS, rand);
     let workLon: number, workLat: number, workCluster: string;
     if (!cluster.lon) {
-      // Local — work near home
       workLon = homeLon + (rand() - 0.5) * 0.01;
       workLat = homeLat + (rand() - 0.5) * 0.01;
       workCluster = "Local";
@@ -497,7 +564,7 @@ export async function generateAgents(n: number, seed: number): Promise<SimAgent[
       workCluster = cluster.name;
     }
 
-    agents.push({ id: i, homeLon, homeLat, workLon, workLat, income, transitDep, workCluster });
+    agents.push({ id: i, homeLon, homeLat, workLon, workLat, income, transitDep, workCluster, departureMin, direction });
   }
   return agents;
 }
@@ -505,10 +572,19 @@ export async function generateAgents(n: number, seed: number): Promise<SimAgent[
 // ── Routing ───────────────────────────────────────────────────────────────────
 
 function routeAgent(agent: SimAgent, graph: Graph, stops: Map<number, GraphStop>): TripResult {
-  const carMin = carTravelMin(agent.homeLon, agent.homeLat, agent.workLon, agent.workLat);
+  const congestion = congestionMultiplierAt(agent.departureMin);
+  // For "to_home" trips swap origin/destination
+  const [originLon, originLat, destLon, destLat] =
+    agent.direction === "to_work"
+      ? [agent.homeLon, agent.homeLat, agent.workLon, agent.workLat]
+      : [agent.workLon, agent.workLat, agent.homeLon, agent.homeLat];
 
-  const access = findNearestStop(agent.homeLon, agent.homeLat, ACCESS_WALK_M, stops);
-  const egress = findNearestStop(agent.workLon, agent.workLat, ACCESS_WALK_M, stops);
+  // Car time scaled by congestion at departure time
+  const baseCarMin = carTravelMin(originLon, originLat, destLon, destLat);
+  const carMin = +(baseCarMin / congestion).toFixed(2);
+
+  const access = findNearestStop(originLon, originLat, ACCESS_WALK_M, stops);
+  const egress = findNearestStop(destLon, destLat, ACCESS_WALK_M, stops);
 
   if (!access || !egress) {
     return { agentId: agent.id, feasible: false, totalMin: carMin, transitMin: 0, accessWalkMin: 0, egressWalkMin: 0, transfers: 0, pathIds: [], carMin, edgesUsed: [] };
@@ -562,7 +638,12 @@ function routeAgent(agent: SimAgent, graph: Graph, stops: Map<number, GraphStop>
 }
 
 function routeAll(agents: SimAgent[], graph: Graph, stops: Map<number, GraphStop>): TripResult[] {
-  return agents.map((a) => routeAgent(a, graph, stops));
+  // Route in departure-time order so earlier agents route first
+  const sorted = [...agents].sort((a, b) => a.departureMin - b.departureMin);
+  const results = sorted.map((a) => routeAgent(a, graph, stops));
+  // Re-sort back to original agent id order for consistent indexing
+  results.sort((a, b) => a.agentId - b.agentId);
+  return results;
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -670,6 +751,7 @@ export async function runSimulation(opts: {
   proposed: ProposedLine[];
   agentCount: number;
   seed: number;
+  timeWindow: TimeWindow;
 }): Promise<SimulationResult> {
   const t0 = Date.now();
   const hasProposed = opts.proposed.length > 0;
@@ -677,7 +759,7 @@ export async function runSimulation(opts: {
   const { graph: baseGraph, stops: baseStops } = buildGraph([]);
   const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed) : { graph: baseGraph, stops: baseStops };
 
-  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 2000)), opts.seed);
+  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 2000)), opts.seed, opts.timeWindow);
 
   const baseResults = routeAll(agents, baseGraph, baseStops);
   const scenResults = hasProposed ? routeAll(agents, scenGraph, scenStops) : baseResults;
@@ -711,6 +793,8 @@ export async function runSimulation(opts: {
       baselineTime: b.totalMin, scenarioTime: s.totalMin,
       timeSavedMin: +(b.totalMin - s.totalMin).toFixed(2),
       newlyAccessible: !b.feasible && s.feasible,
+      departureMin: a.departureMin,
+      direction: a.direction,
       pathCoords,
     };
   });
@@ -721,6 +805,7 @@ export async function runSimulation(opts: {
     hasProposedLines: hasProposed,
     agentCount: agents.length,
     runDurationS: +((Date.now() - t0) / 1000).toFixed(2),
+    timeWindow: opts.timeWindow,
     baseline: baseStats,
     scenario: scenStats,
     delta: {

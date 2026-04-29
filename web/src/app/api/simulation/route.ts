@@ -1,7 +1,7 @@
 import "server-only";
 import { type NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { runSimulation, type SimulationResult, type StressSegment } from "~/server/simulation";
+import { runSimulation, type SimulationResult, type StressSegment, type TimeWindow } from "~/server/simulation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -62,6 +62,7 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
     agent_count: r.agentCount,
     run_duration_s: r.runDurationS,
     has_proposed_lines: r.hasProposedLines,
+    time_window: r.timeWindow,
     baseline: {
       pct_accessible: r.baseline.pctAccessible,
       avg_transit_time_min: r.baseline.avgTransitMin,
@@ -105,6 +106,8 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
       scenario_time: p.scenarioTime,
       time_saved_min: p.timeSavedMin,
       newly_accessible: p.newlyAccessible,
+      departure_min: p.departureMin,
+      direction: p.direction,
       path_coords: p.pathCoords,
     })),
     narrative,
@@ -126,6 +129,7 @@ export async function POST(req: NextRequest) {
     scenario_name?: string;
     seed?: number;
     narrate?: boolean;
+    time_window?: TimeWindow;
   };
 
   try {
@@ -139,6 +143,7 @@ export async function POST(req: NextRequest) {
       proposed: body.proposed_lines ?? [],
       agentCount: body.agent_count ?? 500,
       seed: body.seed ?? 42,
+      timeWindow: body.time_window ?? "morning",
     });
 
     const narrative =
@@ -159,8 +164,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    // Quick smoke-test: build graph and return stats
-    const result = await runSimulation({ proposed: [], agentCount: 50, seed: 42 });
+    const result = await runSimulation({ proposed: [], agentCount: 50, seed: 42, timeWindow: "morning" });
     return NextResponse.json({
       graph_loaded: true,
       stop_count: result.graphStats.nodes,

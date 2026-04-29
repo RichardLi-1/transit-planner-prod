@@ -772,8 +772,10 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     }
   }, [simResults, mapLoaded]);
 
-  // Agent animation — moves dots along each agent's path over ANIM_DURATION_MS
-  const ANIM_DURATION_MS = 8000;
+  // Agent animation — clock-driven: simulated time runs from earliest departure
+  // to latest arrival, compressed into 12 seconds of real time.
+  const ANIM_DURATION_MS = 12000;
+  const [animClockLabel, setAnimClockLabel] = useState<string | null>(null);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -785,17 +787,38 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
       animStartRef.current = null;
+      setAnimClockLabel(null);
       if (map.getLayer(LYR)) map.removeLayer(LYR);
       if (map.getSource(SRC)) map.removeSource(SRC);
     };
 
     if (!animAgents?.length) { cleanup(); return; }
 
-    // Colour per income bracket
     const DOT_COLOR: Record<string, string> = { low: "#f97316", mid: "#8b5cf6", high: "#06b6d4" };
 
-    // Pre-compute cumulative distances per agent for smooth interpolation
-    type AgentPath = { coords: [number, number][]; cumDist: number[]; totalDist: number; color: string };
+    // Determine simulated time range across all agents
+    // Each agent is active from departureMin to departureMin + totalMin
+    const simStart = Math.min(...animAgents.map((a) => a.departure_min));
+    const simEnd   = Math.max(...animAgents.map((a) => a.departure_min + (a.baseline_time || 60)));
+    const simSpan  = Math.max(simEnd - simStart, 1);
+
+    function toHHMM(mins: number): string {
+      const h = Math.floor(mins / 60) % 24;
+      const m = Math.floor(mins % 60);
+      const ampm = h >= 12 ? "pm" : "am";
+      return `${h % 12 === 0 ? 12 : h % 12}:${m.toString().padStart(2, "0")}${ampm}`;
+    }
+
+    // Pre-compute cumulative distances for path interpolation
+    type AgentPath = {
+      coords: [number, number][];
+      cumDist: number[];
+      totalDist: number;
+      color: string;
+      departureMin: number;
+      durationMin: number;
+    };
+
     const paths: AgentPath[] = animAgents.map((a) => {
       const coords = a.path_coords;
       const cumDist: number[] = [0];
@@ -807,7 +830,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         const aa = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
         cumDist.push(cumDist[i - 1]! + 6371000 * 2 * Math.asin(Math.sqrt(aa)));
       }
-      return { coords, cumDist, totalDist: cumDist[cumDist.length - 1] ?? 0, color: DOT_COLOR[a.income] ?? "#8b5cf6" };
+      return {
+        coords, cumDist,
+        totalDist: cumDist[cumDist.length - 1] ?? 0,
+        color: DOT_COLOR[a.income] ?? "#8b5cf6",
+        departureMin: a.departure_min,
+        durationMin: Math.max(a.baseline_time, 1),
+      };
     });
 
     function positionAt(path: AgentPath, t: number): [number, number] {
@@ -824,7 +853,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       return [lon1 + frac * (lon2 - lon1), lat1 + frac * (lat2 - lat1)];
     }
 
-    // Ensure source + layer exist before animation loop
     if (!map.getSource(SRC)) {
       map.addSource(SRC, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
@@ -843,21 +871,30 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
     function frame(now: number) {
       if (!animStartRef.current) animStartRef.current = now;
-      const t = Math.min((now - animStartRef.current) / ANIM_DURATION_MS, 1);
+      const wallT = Math.min((now - animStartRef.current) / ANIM_DURATION_MS, 1);
+      // Current simulated time in minutes from midnight
+      const simNow = simStart + wallT * simSpan;
+      setAnimClockLabel(toHHMM(simNow));
 
-      const features = paths.map((path) => {
+      const features: object[] = [];
+      for (const path of paths) {
+        const arrivalMin = path.departureMin + path.durationMin;
+        // Only show agent while they're actively travelling
+        if (simNow < path.departureMin || simNow > arrivalMin) continue;
+        // t = 0 at departure, 1 at arrival
+        const t = (simNow - path.departureMin) / path.durationMin;
         const [lon, lat] = positionAt(path, t);
-        return {
-          type: "Feature" as const,
+        features.push({
+          type: "Feature",
           properties: { color: path.color },
-          geometry: { type: "Point" as const, coordinates: [lon, lat] },
-        };
-      });
+          geometry: { type: "Point", coordinates: [lon, lat] },
+        });
+      }
 
-      (map.getSource(SRC) as mapboxgl.GeoJSONSource | undefined)
-        ?.setData({ type: "FeatureCollection", features });
+      (map!.getSource(SRC) as mapboxgl.GeoJSONSource | undefined)
+        ?.setData({ type: "FeatureCollection", features: features as GeoJSON.Feature[] });
 
-      if (t < 1) {
+      if (wallT < 1) {
         animFrameRef.current = requestAnimationFrame(frame);
       } else {
         animFrameRef.current = null;
@@ -4442,6 +4479,11 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           <div className="text-sm text-stone-700">
             Animating <span className="font-semibold text-violet-700">{animAgents.length.toLocaleString()}</span> agents
           </div>
+          {animClockLabel && (
+            <div className="rounded-lg bg-stone-900 px-2.5 py-1 font-mono text-sm font-semibold text-white tabular-nums">
+              {animClockLabel}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-[11px] text-stone-400">
             <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> Low-income</span>
             <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Mid-income</span>
