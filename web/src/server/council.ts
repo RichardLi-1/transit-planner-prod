@@ -198,25 +198,38 @@ const PROPOSE_ROUTE_TOOL: ToolDefinition = {
 
 // ── Geometry helpers ───────────────────────────────────────────────────────────
 
-// Greedy nearest-neighbour reordering so stops connect in geographic sequence
-// regardless of the order the model outputs them. O(n²) is fine for ≤20 stops.
+// Reorder stops into corridor sequence by projecting onto the axis connecting the
+// two farthest-apart endpoints. Finding the endpoints first avoids greedy
+// nearest-neighbour's tendency to snake back along already-visited segments.
+// 📖 Learn: the dot product (p - A) · (B - A) gives a scalar measuring how far
+// along the A→B direction each stop lies. Sorting by this scalar puts all stops
+// in corridor order regardless of their original list order.
 function sortRouteStops(route: Record<string, unknown>): Record<string, unknown> {
   const stops = route.stops as Array<{ name: string; coords: [number, number] }> | undefined;
   if (!stops || stops.length <= 2) return route;
 
-  const remaining = [...stops];
-  const sorted = [remaining.splice(0, 1)[0]!];
-  while (remaining.length > 0) {
-    const last = sorted[sorted.length - 1]!;
-    let minD = Infinity, minIdx = 0;
-    for (let i = 0; i < remaining.length; i++) {
-      const dx = last.coords[0] - remaining[i]!.coords[0];
-      const dy = last.coords[1] - remaining[i]!.coords[1];
+  // Step 1: find the two stops that are farthest apart — these are the endpoints.
+  let maxD = 0, endA = 0, endB = 1;
+  for (let i = 0; i < stops.length; i++) {
+    for (let j = i + 1; j < stops.length; j++) {
+      const dx = stops[i]!.coords[0] - stops[j]!.coords[0];
+      const dy = stops[i]!.coords[1] - stops[j]!.coords[1];
       const d = dx * dx + dy * dy;
-      if (d < minD) { minD = d; minIdx = i; }
+      if (d > maxD) { maxD = d; endA = i; endB = j; }
     }
-    sorted.push(remaining.splice(minIdx, 1)[0]!);
   }
+
+  // Step 2: sort by projection onto the axis connecting the two endpoints.
+  const ax = stops[endA]!.coords[0], ay = stops[endA]!.coords[1];
+  const bx = stops[endB]!.coords[0], by = stops[endB]!.coords[1];
+  const axisX = bx - ax, axisY = by - ay;
+
+  const sorted = [...stops].sort((a, b) => {
+    const pa = (a.coords[0] - ax) * axisX + (a.coords[1] - ay) * axisY;
+    const pb = (b.coords[0] - ax) * axisX + (b.coords[1] - ay) * axisY;
+    return pa - pb;
+  });
+
   return { ...route, stops: sorted };
 }
 
