@@ -105,6 +105,7 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
       scenario_time: p.scenarioTime,
       time_saved_min: p.timeSavedMin,
       newly_accessible: p.newlyAccessible,
+      path_coords: p.pathCoords,
     })),
     narrative,
     graph_stats: {

@@ -18,7 +18,19 @@ import { supabase } from "./supabase";
 const WALK_TRANSFER_M = 400;    // max walk to transfer between lines
 const ACCESS_WALK_M   = 800;    // max walk from home/work to a stop
 const WALK_SPEED_MPS  = 5 / 3.6;
-const CAR_SPEED_KMH   = 22;     // congested Toronto average
+// Car speed varies by distance from downtown core:
+//   0–3 km  : ~20 km/h (matches bus speed — gridlock)
+//   3–8 km  : ~28 km/h (inner suburbs, still congested)
+//   8–15 km : ~35 km/h (mid suburbs)
+//   15+ km  : ~45 km/h (outer suburbs, expressway access)
+const CAR_SPEED_ZONES: { maxDistM: number; speedKmh: number }[] = [
+  { maxDistM:  3_000, speedKmh: 20 },
+  { maxDistM:  8_000, speedKmh: 28 },
+  { maxDistM: 15_000, speedKmh: 35 },
+  { maxDistM: Infinity, speedKmh: 45 },
+];
+const DOWNTOWN_LON = -79.382;
+const DOWNTOWN_LAT =  43.649;
 
 // Transit speeds by route type
 const SPEED: Record<Route["type"], number> = {
@@ -40,18 +52,22 @@ const BOARD_PENALTY: Record<Route["type"], number> = {
 
 // ── Employment clusters (Toronto) ─────────────────────────────────────────────
 
+// Work destinations — intentionally downtown-heavy.
+// Union/King/Queen/Financial District absorb ~50% of all commuters.
 const WORK_CLUSTERS: { name: string; lon: number; lat: number; weight: number }[] = [
-  { name: "Downtown Core",     lon: -79.382, lat: 43.648, weight: 0.32 },
-  { name: "Hospital Row",      lon: -79.390, lat: 43.657, weight: 0.07 },
-  { name: "Yonge & Bloor",     lon: -79.385, lat: 43.671, weight: 0.08 },
-  { name: "Midtown Y/E",       lon: -79.398, lat: 43.705, weight: 0.08 },
-  { name: "North York Centre", lon: -79.411, lat: 43.761, weight: 0.07 },
-  { name: "Scarborough TC",    lon: -79.259, lat: 43.774, weight: 0.06 },
-  { name: "Etobicoke Centre",  lon: -79.548, lat: 43.644, weight: 0.06 },
-  { name: "Pearson/Airport",   lon: -79.616, lat: 43.677, weight: 0.05 },
-  { name: "Liberty Village",   lon: -79.420, lat: 43.640, weight: 0.05 },
-  { name: "East Danforth",     lon: -79.330, lat: 43.680, weight: 0.04 },
-  { name: "Local (same area)", lon:    null as unknown as number, lat: null as unknown as number, weight: 0.12 },
+  { name: "Union / Financial District", lon: -79.381, lat: 43.645, weight: 0.22 },
+  { name: "King West / Entertainment",  lon: -79.396, lat: 43.644, weight: 0.12 },
+  { name: "Queen / City Hall",          lon: -79.384, lat: 43.652, weight: 0.10 },
+  { name: "Hospital Row",               lon: -79.392, lat: 43.658, weight: 0.07 },
+  { name: "Yonge & Bloor",             lon: -79.385, lat: 43.671, weight: 0.07 },
+  { name: "Liberty Village",            lon: -79.420, lat: 43.638, weight: 0.05 },
+  { name: "Midtown Yonge/Eg",          lon: -79.398, lat: 43.705, weight: 0.05 },
+  { name: "North York Centre",          lon: -79.411, lat: 43.761, weight: 0.05 },
+  { name: "Scarborough TC",             lon: -79.259, lat: 43.774, weight: 0.04 },
+  { name: "Etobicoke Centre",           lon: -79.548, lat: 43.644, weight: 0.04 },
+  { name: "Pearson / Airport",          lon: -79.616, lat: 43.677, weight: 0.03 },
+  { name: "East Danforth",              lon: -79.330, lat: 43.680, weight: 0.03 },
+  { name: "Local (same area)",          lon: null as unknown as number, lat: null as unknown as number, weight: 0.13 },
 ];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -157,6 +173,8 @@ interface PerAgentDelta {
   scenarioTime: number;
   timeSavedMin: number;
   newlyAccessible: boolean;
+  // Full coordinate path for animation [[lon,lat], ...], empty if infeasible
+  pathCoords: [number, number][];
 }
 
 // ── Haversine ─────────────────────────────────────────────────────────────────
@@ -174,6 +192,28 @@ function haversineM(lon1: number, lat1: number, lon2: number, lat2: number): num
 
 function walkMin(distM: number): number {
   return distM / WALK_SPEED_MPS / 60;
+}
+
+// Estimate car travel time by sampling the straight-line path in small steps
+// and applying the speed zone at each sample point's distance from downtown.
+function carTravelMin(homeLon: number, homeLat: number, workLon: number, workLat: number): number {
+  const totalDistM = haversineM(homeLon, homeLat, workLon, workLat);
+  if (totalDistM < 1) return 0;
+
+  const STEPS = 10;
+  let totalMin = 0;
+  const segDistM = totalDistM / STEPS;
+
+  for (let i = 0; i < STEPS; i++) {
+    const t = (i + 0.5) / STEPS; // midpoint of this segment
+    const lon = homeLon + t * (workLon - homeLon);
+    const lat = homeLat + t * (workLat - homeLat);
+    const distFromCore = haversineM(lon, lat, DOWNTOWN_LON, DOWNTOWN_LAT);
+    const zone = CAR_SPEED_ZONES.find((z) => distFromCore <= z.maxDistM)!;
+    totalMin += (segDistM / 1000 / zone.speedKmh) * 60;
+  }
+
+  return +totalMin.toFixed(2);
 }
 
 // ── Graph construction ────────────────────────────────────────────────────────
@@ -383,13 +423,15 @@ function weightedChoice<T extends { weight: number }>(items: T[], rand: () => nu
 }
 
 async function loadPopulationPoints(): Promise<{ lon: number; lat: number; weight: number }[]> {
-  // Toronto bounding box
+  // Fetch the most populated cells first so the limit captures dense areas across
+  // the whole city rather than whatever happened to be inserted first.
   const { data, error } = await supabase
     .from("pop_data")
     .select("longitude, latitude, population")
     .gte("latitude", 43.4).lte("latitude", 43.9)
     .gte("longitude", -79.7).lte("longitude", -79.1)
     .gt("population", 0)
+    .order("population", { ascending: false })
     .limit(5000);
 
   if (error || !data?.length) {
@@ -434,8 +476,12 @@ export async function generateAgents(n: number, seed: number): Promise<SimAgent[
   const agents: SimAgent[] = [];
   for (let i = 0; i < n; i++) {
     const pt = weightedChoice(popPoints, rand);
-    const homeLon = pt.lon + (rand() - 0.5) * 0.002;
-    const homeLat = pt.lat + (rand() - 0.5) * 0.002;
+    // Jitter radius scales with distance from downtown so suburban agents
+    // aren't all pinned to a single census cell centroid (~150m downtown, ~600m outer)
+    const distFromCore = haversineM(pt.lon, pt.lat, DOWNTOWN_LON, DOWNTOWN_LAT);
+    const jitterDeg = 0.0015 + (distFromCore / 30_000) * 0.004; // ~150m–600m
+    const homeLon = pt.lon + (rand() - 0.5) * jitterDeg;
+    const homeLat = pt.lat + (rand() - 0.5) * jitterDeg;
     const { income, transitDep } = incomeFor(homeLon, homeLat);
 
     const cluster = weightedChoice(WORK_CLUSTERS, rand);
@@ -459,8 +505,7 @@ export async function generateAgents(n: number, seed: number): Promise<SimAgent[
 // ── Routing ───────────────────────────────────────────────────────────────────
 
 function routeAgent(agent: SimAgent, graph: Graph, stops: Map<number, GraphStop>): TripResult {
-  const carDist = haversineM(agent.homeLon, agent.homeLat, agent.workLon, agent.workLat);
-  const carMin  = (carDist / 1000 / CAR_SPEED_KMH) * 60;
+  const carMin = carTravelMin(agent.homeLon, agent.homeLat, agent.workLon, agent.workLat);
 
   const access = findNearestStop(agent.homeLon, agent.homeLat, ACCESS_WALK_M, stops);
   const egress = findNearestStop(agent.workLon, agent.workLat, ACCESS_WALK_M, stops);
@@ -559,20 +604,26 @@ function snapshotStats(agents: SimAgent[], results: TripResult[]): RunStats {
 }
 
 function equityScore(agents: SimAgent[], results: TripResult[]): number {
+  // Equity = weighted accessibility rate.
+  // Each agent contributes (income weight × transit dependency) to the numerator
+  // if they have a feasible transit path, or 0 if not.
+  // Low-income agents count 1.5×: transit access matters more when you can't afford a car.
   const IW: Record<string, number> = { low: 1.5, mid: 1.0, high: 0.5 };
   const agentMap = new Map(agents.map((a) => [a.id, a]));
-  const weighted: number[] = [];
+  let weightedAccessible = 0;
+  let weightedTotal = 0;
   for (const r of results) {
-    if (!r.feasible) continue;
     const a = agentMap.get(r.agentId);
     if (!a) continue;
-    const saving = r.carMin - r.totalMin;
-    weighted.push(saving * a.transitDep * (IW[a.income] ?? 1));
+    const w = (IW[a.income] ?? 1) * a.transitDep;
+    weightedTotal += w;
+    if (r.feasible) weightedAccessible += w;
   }
-  return +(Math.min(100, Math.max(0, mean(weighted) / 30 * 100))).toFixed(1);
+  if (weightedTotal === 0) return 0;
+  return +(weightedAccessible / weightedTotal * 100).toFixed(1);
 }
 
-function computeProposedStress(baseline: TripResult[], scenario: TripResult[], proposed: ProposedLine[]): StressSegment[] {
+function computeProposedStress(_baseline: TripResult[], scenario: TripResult[], proposed: ProposedLine[]): StressSegment[] {
   if (!proposed.length) return [];
   const counter = new Map<string, { seg: StressSegment; count: number }>();
   for (const r of scenario) {
@@ -636,19 +687,33 @@ export async function runSimulation(opts: {
   const baseEquity = equityScore(agents, baseResults);
   const scenEquity = equityScore(agents, scenResults);
 
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
+  // Index results by agentId for O(1) lookup
+  const baseMap = new Map(baseResults.map((r) => [r.agentId, r]));
+  const scenMap = new Map(scenResults.map((r) => [r.agentId, r]));
+
   const perAgent: PerAgentDelta[] = agents.map((a) => {
-    const b = baseResults.find((r) => r.agentId === a.id)!;
-    const s = scenResults.find((r) => r.agentId === a.id)!;
+    const b = baseMap.get(a.id)!;
+    const s = scenMap.get(a.id)!;
+
+    // Build path coords from the active trip's edges (scenario when proposed, else baseline)
+    const activeTrip = hasProposed ? s : b;
+    let pathCoords: [number, number][] = [];
+    if (activeTrip.feasible && activeTrip.edgesUsed.length > 0) {
+      pathCoords = [[activeTrip.edgesUsed[0]!.fromLon, activeTrip.edgesUsed[0]!.fromLat]];
+      for (const e of activeTrip.edgesUsed) {
+        pathCoords.push([e.toLon, e.toLat]);
+      }
+    }
+
     return {
       homeLon: a.homeLon, homeLat: a.homeLat,
       income: a.income, transitDep: a.transitDep,
       baselineTime: b.totalMin, scenarioTime: s.totalMin,
       timeSavedMin: +(b.totalMin - s.totalMin).toFixed(2),
       newlyAccessible: !b.feasible && s.feasible,
+      pathCoords,
     };
   });
-  void agentMap;
 
   const newlyAccessible = perAgent.filter((p) => p.newlyAccessible).length;
 

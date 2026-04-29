@@ -271,6 +271,9 @@ export function TransitMap() {
   const [showStationLabels, setShowStationLabels] = useState(false);
   const [showSimPanel, setShowSimPanel] = useState(false);
   const [simResults, setSimResults] = useState<SimulationResult | null>(null);
+  const [animAgents, setAnimAgents] = useState<import("./map/SimulationPanel").PerAgentResult[] | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const animStartRef = useRef<number | null>(null);
   const [snapProgress, setSnapProgress] = useState<{ routeId: string; pct: number } | null>(null);
   const snapDebounceRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const goShapesRef = useRef<Map<string, [number, number][]>>(new Map());
@@ -768,6 +771,104 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       addOrUpdate(PROP_SRC, PROP_LYR, simResults.line_stress, 0.9, [4, 12]);
     }
   }, [simResults, mapLoaded]);
+
+  // Agent animation — moves dots along each agent's path over ANIM_DURATION_MS
+  const ANIM_DURATION_MS = 8000;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const SRC = "sim-agents-source";
+    const LYR = "sim-agents-layer";
+
+    const cleanup = () => {
+      if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+      animStartRef.current = null;
+      if (map.getLayer(LYR)) map.removeLayer(LYR);
+      if (map.getSource(SRC)) map.removeSource(SRC);
+    };
+
+    if (!animAgents?.length) { cleanup(); return; }
+
+    // Colour per income bracket
+    const DOT_COLOR: Record<string, string> = { low: "#f97316", mid: "#8b5cf6", high: "#06b6d4" };
+
+    // Pre-compute cumulative distances per agent for smooth interpolation
+    type AgentPath = { coords: [number, number][]; cumDist: number[]; totalDist: number; color: string };
+    const paths: AgentPath[] = animAgents.map((a) => {
+      const coords = a.path_coords;
+      const cumDist: number[] = [0];
+      for (let i = 1; i < coords.length; i++) {
+        const [lon1, lat1] = coords[i - 1]!;
+        const [lon2, lat2] = coords[i]!;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const aa = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        cumDist.push(cumDist[i - 1]! + 6371000 * 2 * Math.asin(Math.sqrt(aa)));
+      }
+      return { coords, cumDist, totalDist: cumDist[cumDist.length - 1] ?? 0, color: DOT_COLOR[a.income] ?? "#8b5cf6" };
+    });
+
+    function positionAt(path: AgentPath, t: number): [number, number] {
+      const target = t * path.totalDist;
+      let lo = 0, hi = path.cumDist.length - 2;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (path.cumDist[mid + 1]! < target) lo = mid + 1; else hi = mid;
+      }
+      const seg = path.cumDist[lo + 1]! - path.cumDist[lo]!;
+      const frac = seg > 0 ? (target - path.cumDist[lo]!) / seg : 0;
+      const [lon1, lat1] = path.coords[lo]!;
+      const [lon2, lat2] = path.coords[lo + 1] ?? path.coords[lo]!;
+      return [lon1 + frac * (lon2 - lon1), lat1 + frac * (lat2 - lat1)];
+    }
+
+    // Ensure source + layer exist before animation loop
+    if (!map.getSource(SRC)) {
+      map.addSource(SRC, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: LYR,
+        type: "circle",
+        source: SRC,
+        paint: {
+          "circle-radius": 3,
+          "circle-color": ["get", "color"],
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 0.5,
+          "circle-stroke-color": "#fff",
+        },
+      });
+    }
+
+    function frame(now: number) {
+      if (!animStartRef.current) animStartRef.current = now;
+      const t = Math.min((now - animStartRef.current) / ANIM_DURATION_MS, 1);
+
+      const features = paths.map((path) => {
+        const [lon, lat] = positionAt(path, t);
+        return {
+          type: "Feature" as const,
+          properties: { color: path.color },
+          geometry: { type: "Point" as const, coordinates: [lon, lat] },
+        };
+      });
+
+      (map.getSource(SRC) as mapboxgl.GeoJSONSource | undefined)
+        ?.setData({ type: "FeatureCollection", features });
+
+      if (t < 1) {
+        animFrameRef.current = requestAnimationFrame(frame);
+      } else {
+        animFrameRef.current = null;
+      }
+    }
+
+    animStartRef.current = null;
+    animFrameRef.current = requestAnimationFrame(frame);
+
+    return cleanup;
+  }, [animAgents, mapLoaded]);
 
   // GO train toggle — add or remove GO routes (and their map layers)
   const goTrainMountRef = useRef(true);
@@ -3537,8 +3638,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       >
         <SimulationPanel
           customRoutes={routes.filter((r) => r.id.startsWith("custom-"))}
-          onClose={() => { setShowSimPanel(false); setSimResults(null); }}
-          onResults={(r) => setSimResults(r)}
+          onClose={() => { setShowSimPanel(false); setSimResults(null); setAnimAgents(null); }}
+          onResults={(r) => { setSimResults(r); setAnimAgents(null); }}
+          onAnimate={(agents) => setAnimAgents(agents)}
         />
       </div>
 
@@ -4328,6 +4430,42 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onOpenGameMode={() => setShowGameMode(true)}
         />
       </div>
+
+      {/* Agent animation controls */}
+      {animAgents && (
+        <div className="pointer-events-auto absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl border border-[#D7D7D7] bg-white px-5 py-3 shadow-xl">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="9" />
+            </svg>
+          </div>
+          <div className="text-sm text-stone-700">
+            Animating <span className="font-semibold text-violet-700">{animAgents.length.toLocaleString()}</span> agents
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-stone-400">
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> Low-income</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Mid-income</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-cyan-500" /> High-income</span>
+          </div>
+          <button
+            onClick={() => {
+              setAnimAgents(null);
+            }}
+            className="ml-2 rounded-lg px-3 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 transition-colors"
+          >
+            Stop
+          </button>
+          <button
+            onClick={() => {
+              animStartRef.current = null;
+              setAnimAgents([...animAgents]);
+            }}
+            className="rounded-lg px-3 py-1 text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+          >
+            Replay
+          </button>
+        </div>
+      )}
     </div>
   );
 }

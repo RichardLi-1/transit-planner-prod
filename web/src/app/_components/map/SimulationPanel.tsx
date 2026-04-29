@@ -52,6 +52,7 @@ export interface PerAgentResult {
   scenario_time: number;
   time_saved_min: number;
   newly_accessible: boolean;
+  path_coords: [number, number][];
 }
 
 export interface SimulationResult {
@@ -79,6 +80,7 @@ export interface SimulationPanelProps {
   customRoutes: Route[];
   onClose: () => void;
   onResults: (result: SimulationResult | null) => void;
+  onAnimate: (agents: PerAgentResult[]) => void;
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -186,7 +188,7 @@ function StressBar({ segment }: { segment: StressSegment }) {
 
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
-export function SimulationPanel({ customRoutes, onClose, onResults }: SimulationPanelProps) {
+export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }: SimulationPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
@@ -446,6 +448,13 @@ export function SimulationPanel({ customRoutes, onClose, onResults }: Simulation
                   {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s ·{" "}
                   {result.graph_stats.baseline_nodes.toLocaleString()} stops in graph
                 </p>
+
+                <button
+                  onClick={() => onAnimate(result.per_agent.filter((p) => p.path_coords.length > 0))}
+                  className="w-full rounded-xl py-2 text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 active:scale-[0.98] transition-all"
+                >
+                  Animate agents on map
+                </button>
 
                 <button
                   onClick={() => { setResult(null); onResults(null); }}
