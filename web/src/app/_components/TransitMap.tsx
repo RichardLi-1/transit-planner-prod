@@ -25,6 +25,7 @@ import { MobileNav } from "./MobileNav";
 import { ChangelogModal } from "./map/ChangelogModal";
 import { FeedbackModal } from "./map/FeedbackModal";
 import { ChatPanel, type ParsedRoute, type ToolCallEvent } from "./ChatPanel";
+import { SimulationPanel, type SimulationResult } from "./map/SimulationPanel";
 import { useUser } from "@auth0/nextjs-auth0/client";
 import Image from "next/image";
 import { useOverlay } from "./map/hooks/useOverlay";
@@ -268,6 +269,8 @@ export function TransitMap() {
   const measurePtsRef = useRef<[number, number][]>([]);
   const [showGameMode, setShowGameMode] = useState(false);
   const [showStationLabels, setShowStationLabels] = useState(false);
+  const [showSimPanel, setShowSimPanel] = useState(false);
+  const [simResults, setSimResults] = useState<SimulationResult | null>(null);
   const [snapProgress, setSnapProgress] = useState<{ routeId: string; pct: number } | null>(null);
   const snapDebounceRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const goShapesRef = useRef<Map<string, [number, number][]>>(new Map());
@@ -710,6 +713,61 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         map.setPaintProperty(`stops-dot-${route.id}`, "circle-opacity", isActive ? (bus ? 0.6 : 0.9) : 0.04);
     }
   }, [simState, routes, mapLoaded]);
+
+  // Simulation stress overlay — two layers:
+  //   sim-baseline-stress : top existing edges coloured by agent load
+  //   sim-proposed-stress : proposed new line segments coloured by load
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const BASE_SRC  = "sim-baseline-stress-source";
+    const BASE_LYR  = "sim-baseline-stress-layer";
+    const PROP_SRC  = "sim-proposed-stress-source";
+    const PROP_LYR  = "sim-proposed-stress-layer";
+
+    const toFeature = (seg: { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }) => ({
+      type: "Feature" as const,
+      properties: { stress_pct: seg.stress_pct, label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips})` },
+      geometry: { type: "LineString" as const, coordinates: [seg.from_coords, seg.to_coords] },
+    });
+
+    const addOrUpdate = (srcId: string, lyrId: string, segs: typeof simResults extends null ? never[] : { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }[], opacity: number, widthRange: [number, number]) => {
+      const geojson = { type: "FeatureCollection" as const, features: segs.map(toFeature) };
+      if (map.getSource(srcId)) {
+        (map.getSource(srcId) as mapboxgl.GeoJSONSource).setData(geojson);
+      } else {
+        map.addSource(srcId, { type: "geojson", data: geojson });
+        map.addLayer({
+          id: lyrId,
+          type: "line",
+          source: srcId,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, widthRange[0], 100, widthRange[1]],
+            "line-color": ["interpolate", ["linear"], ["get", "stress_pct"], 0, "#10b981", 40, "#f59e0b", 75, "#ef4444"],
+            "line-opacity": opacity,
+          },
+        });
+      }
+    };
+
+    if (!simResults) {
+      [BASE_LYR, PROP_LYR].forEach((l) => { if (map.getLayer(l)) map.removeLayer(l); });
+      [BASE_SRC, PROP_SRC].forEach((s) => { if (map.getSource(s)) map.removeSource(s); });
+      return;
+    }
+
+    // Baseline stress — existing edges, subtle
+    if (simResults.baseline_edge_stress.length > 0) {
+      addOrUpdate(BASE_SRC, BASE_LYR, simResults.baseline_edge_stress, 0.55, [2, 7]);
+    }
+
+    // Proposed line stress — bolder
+    if (simResults.line_stress.length > 0) {
+      addOrUpdate(PROP_SRC, PROP_LYR, simResults.line_stress, 0.9, [4, 12]);
+    }
+  }, [simResults, mapLoaded]);
 
   // GO train toggle — add or remove GO routes (and their map layers)
   const goTrainMountRef = useRef(true);
@@ -3288,6 +3346,20 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           Traffic
         </button>
 
+        {/* Simulate button */}
+        <button
+          onClick={() => setShowSimPanel((v) => !v)}
+          className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
+            showSimPanel ? "text-violet-700 border-violet-300 bg-violet-50" : "text-stone-400"
+          }`}
+        >
+          <span
+            className="h-3 w-3 shrink-0 rounded-full"
+            style={{ background: showSimPanel ? "#7c3aed" : "#d1d5db" }}
+          />
+          Simulate
+        </button>
+
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
         <div className="relative">
         <div className="pointer-events-auto flex h-13 items-center gap-1 rounded-xl border border-[#D7D7D7] bg-white px-2 shadow-sm">
@@ -3455,6 +3527,20 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           </div>
         </div>
       )}
+
+      {/* Simulation panel — slides in from the right, independent of route panel */}
+      <div
+        className={`pointer-events-none absolute right-6 bottom-6 flex items-start transition-all duration-300 ease-in-out z-10 ${
+          showSimPanel && !selectedRoute && !showGeneratedPanel ? "translate-x-0" : "translate-x-[calc(100%+2.25rem)]"
+        }`}
+        style={{ top: "80px" }}
+      >
+        <SimulationPanel
+          customRoutes={routes.filter((r) => r.id.startsWith("custom-"))}
+          onClose={() => { setShowSimPanel(false); setSimResults(null); }}
+          onResults={(r) => setSimResults(r)}
+        />
+      </div>
 
       {/* Side panel — only one shown at a time to prevent overlap */}
       <div

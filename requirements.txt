@@ -6,6 +6,7 @@ dotenv
 fastapi
 greenlet
 idna
+networkx
 psycopg[binary]
 pydantic
 pydantic_core
