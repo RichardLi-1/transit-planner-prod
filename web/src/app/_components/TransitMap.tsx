@@ -25,6 +25,7 @@ import { MobileNav } from "./MobileNav";
 import { ChangelogModal } from "./map/ChangelogModal";
 import { FeedbackModal } from "./map/FeedbackModal";
 import { ChatPanel, type ParsedRoute, type ToolCallEvent } from "./ChatPanel";
+import { SimulationPanel, type SimulationResult } from "./map/SimulationPanel";
 import { useUser } from "@auth0/nextjs-auth0/client";
 import Image from "next/image";
 import { useOverlay } from "./map/hooks/useOverlay";
@@ -268,6 +269,11 @@ export function TransitMap() {
   const measurePtsRef = useRef<[number, number][]>([]);
   const [showGameMode, setShowGameMode] = useState(false);
   const [showStationLabels, setShowStationLabels] = useState(false);
+  const [showSimPanel, setShowSimPanel] = useState(false);
+  const [simResults, setSimResults] = useState<SimulationResult | null>(null);
+  const [animAgents, setAnimAgents] = useState<import("./map/SimulationPanel").PerAgentResult[] | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const animStartRef = useRef<number | null>(null);
   const [snapProgress, setSnapProgress] = useState<{ routeId: string; pct: number } | null>(null);
   const snapDebounceRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const goShapesRef = useRef<Map<string, [number, number][]>>(new Map());
@@ -710,6 +716,196 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         map.setPaintProperty(`stops-dot-${route.id}`, "circle-opacity", isActive ? (bus ? 0.6 : 0.9) : 0.04);
     }
   }, [simState, routes, mapLoaded]);
+
+  // Simulation stress overlay — two layers:
+  //   sim-baseline-stress : top existing edges coloured by agent load
+  //   sim-proposed-stress : proposed new line segments coloured by load
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const BASE_SRC  = "sim-baseline-stress-source";
+    const BASE_LYR  = "sim-baseline-stress-layer";
+    const PROP_SRC  = "sim-proposed-stress-source";
+    const PROP_LYR  = "sim-proposed-stress-layer";
+
+    const toFeature = (seg: { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }) => ({
+      type: "Feature" as const,
+      properties: { stress_pct: seg.stress_pct, label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips})` },
+      geometry: { type: "LineString" as const, coordinates: [seg.from_coords, seg.to_coords] },
+    });
+
+    const addOrUpdate = (srcId: string, lyrId: string, segs: typeof simResults extends null ? never[] : { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }[], opacity: number, widthRange: [number, number]) => {
+      const geojson = { type: "FeatureCollection" as const, features: segs.map(toFeature) };
+      if (map.getSource(srcId)) {
+        (map.getSource(srcId) as mapboxgl.GeoJSONSource).setData(geojson);
+      } else {
+        map.addSource(srcId, { type: "geojson", data: geojson });
+        map.addLayer({
+          id: lyrId,
+          type: "line",
+          source: srcId,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, widthRange[0], 100, widthRange[1]],
+            "line-color": ["interpolate", ["linear"], ["get", "stress_pct"], 0, "#10b981", 40, "#f59e0b", 75, "#ef4444"],
+            "line-opacity": opacity,
+          },
+        });
+      }
+    };
+
+    if (!simResults) {
+      [BASE_LYR, PROP_LYR].forEach((l) => { if (map.getLayer(l)) map.removeLayer(l); });
+      [BASE_SRC, PROP_SRC].forEach((s) => { if (map.getSource(s)) map.removeSource(s); });
+      return;
+    }
+
+    // Baseline stress — existing edges, subtle
+    if (simResults.baseline_edge_stress.length > 0) {
+      addOrUpdate(BASE_SRC, BASE_LYR, simResults.baseline_edge_stress, 0.55, [2, 7]);
+    }
+
+    // Proposed line stress — bolder
+    if (simResults.line_stress.length > 0) {
+      addOrUpdate(PROP_SRC, PROP_LYR, simResults.line_stress, 0.9, [4, 12]);
+    }
+  }, [simResults, mapLoaded]);
+
+  // Agent animation — clock-driven: simulated time runs from earliest departure
+  // to latest arrival, compressed into 12 seconds of real time.
+  const ANIM_DURATION_MS = 12000;
+  const [animClockLabel, setAnimClockLabel] = useState<string | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const SRC = "sim-agents-source";
+    const LYR = "sim-agents-layer";
+
+    const cleanup = () => {
+      if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+      animStartRef.current = null;
+      setAnimClockLabel(null);
+      if (map.getLayer(LYR)) map.removeLayer(LYR);
+      if (map.getSource(SRC)) map.removeSource(SRC);
+    };
+
+    if (!animAgents?.length) { cleanup(); return; }
+
+    const DOT_COLOR: Record<string, string> = { low: "#f97316", mid: "#8b5cf6", high: "#06b6d4" };
+
+    // Determine simulated time range across all agents
+    // Each agent is active from departureMin to departureMin + totalMin
+    const simStart = Math.min(...animAgents.map((a) => a.departure_min));
+    const simEnd   = Math.max(...animAgents.map((a) => a.departure_min + (a.baseline_time || 60)));
+    const simSpan  = Math.max(simEnd - simStart, 1);
+
+    function toHHMM(mins: number): string {
+      const h = Math.floor(mins / 60) % 24;
+      const m = Math.floor(mins % 60);
+      const ampm = h >= 12 ? "pm" : "am";
+      return `${h % 12 === 0 ? 12 : h % 12}:${m.toString().padStart(2, "0")}${ampm}`;
+    }
+
+    // Pre-compute cumulative distances for path interpolation
+    type AgentPath = {
+      coords: [number, number][];
+      cumDist: number[];
+      totalDist: number;
+      color: string;
+      departureMin: number;
+      durationMin: number;
+    };
+
+    const paths: AgentPath[] = animAgents.map((a) => {
+      const coords = a.path_coords;
+      const cumDist: number[] = [0];
+      for (let i = 1; i < coords.length; i++) {
+        const [lon1, lat1] = coords[i - 1]!;
+        const [lon2, lat2] = coords[i]!;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const aa = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        cumDist.push(cumDist[i - 1]! + 6371000 * 2 * Math.asin(Math.sqrt(aa)));
+      }
+      return {
+        coords, cumDist,
+        totalDist: cumDist[cumDist.length - 1] ?? 0,
+        color: DOT_COLOR[a.income] ?? "#8b5cf6",
+        departureMin: a.departure_min,
+        durationMin: Math.max(a.baseline_time, 1),
+      };
+    });
+
+    function positionAt(path: AgentPath, t: number): [number, number] {
+      const target = t * path.totalDist;
+      let lo = 0, hi = path.cumDist.length - 2;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (path.cumDist[mid + 1]! < target) lo = mid + 1; else hi = mid;
+      }
+      const seg = path.cumDist[lo + 1]! - path.cumDist[lo]!;
+      const frac = seg > 0 ? (target - path.cumDist[lo]!) / seg : 0;
+      const [lon1, lat1] = path.coords[lo]!;
+      const [lon2, lat2] = path.coords[lo + 1] ?? path.coords[lo]!;
+      return [lon1 + frac * (lon2 - lon1), lat1 + frac * (lat2 - lat1)];
+    }
+
+    if (!map.getSource(SRC)) {
+      map.addSource(SRC, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: LYR,
+        type: "circle",
+        source: SRC,
+        paint: {
+          "circle-radius": 3,
+          "circle-color": ["get", "color"],
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 0.5,
+          "circle-stroke-color": "#fff",
+        },
+      });
+    }
+
+    function frame(now: number) {
+      if (!animStartRef.current) animStartRef.current = now;
+      const wallT = Math.min((now - animStartRef.current) / ANIM_DURATION_MS, 1);
+      // Current simulated time in minutes from midnight
+      const simNow = simStart + wallT * simSpan;
+      setAnimClockLabel(toHHMM(simNow));
+
+      const features: object[] = [];
+      for (const path of paths) {
+        const arrivalMin = path.departureMin + path.durationMin;
+        // Only show agent while they're actively travelling
+        if (simNow < path.departureMin || simNow > arrivalMin) continue;
+        // t = 0 at departure, 1 at arrival
+        const t = (simNow - path.departureMin) / path.durationMin;
+        const [lon, lat] = positionAt(path, t);
+        features.push({
+          type: "Feature",
+          properties: { color: path.color },
+          geometry: { type: "Point", coordinates: [lon, lat] },
+        });
+      }
+
+      (map!.getSource(SRC) as mapboxgl.GeoJSONSource | undefined)
+        ?.setData({ type: "FeatureCollection", features: features as GeoJSON.Feature[] });
+
+      if (wallT < 1) {
+        animFrameRef.current = requestAnimationFrame(frame);
+      } else {
+        animFrameRef.current = null;
+      }
+    }
+
+    animStartRef.current = null;
+    animFrameRef.current = requestAnimationFrame(frame);
+
+    return cleanup;
+  }, [animAgents, mapLoaded]);
 
   // GO train toggle — add or remove GO routes (and their map layers)
   const goTrainMountRef = useRef(true);
@@ -3288,6 +3484,20 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           Traffic
         </button>
 
+        {/* Simulate button */}
+        <button
+          onClick={() => setShowSimPanel((v) => !v)}
+          className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
+            showSimPanel ? "text-violet-700 border-violet-300 bg-violet-50" : "text-stone-400"
+          }`}
+        >
+          <span
+            className="h-3 w-3 shrink-0 rounded-full"
+            style={{ background: showSimPanel ? "#7c3aed" : "#d1d5db" }}
+          />
+          Simulate
+        </button>
+
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
         <div className="relative">
         <div className="pointer-events-auto flex h-13 items-center gap-1 rounded-xl border border-[#D7D7D7] bg-white px-2 shadow-sm">
@@ -3455,6 +3665,21 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           </div>
         </div>
       )}
+
+      {/* Simulation panel — slides in from the right, independent of route panel */}
+      <div
+        className={`pointer-events-none absolute right-6 bottom-6 flex items-start transition-all duration-300 ease-in-out z-10 ${
+          showSimPanel && !selectedRoute && !showGeneratedPanel ? "translate-x-0" : "translate-x-[calc(100%+2.25rem)]"
+        }`}
+        style={{ top: "80px" }}
+      >
+        <SimulationPanel
+          customRoutes={routes.filter((r) => r.id.startsWith("custom-"))}
+          onClose={() => { setShowSimPanel(false); setSimResults(null); setAnimAgents(null); }}
+          onResults={(r) => { setSimResults(r); setAnimAgents(null); }}
+          onAnimate={(agents) => setAnimAgents(agents)}
+        />
+      </div>
 
       {/* Side panel — only one shown at a time to prevent overlap */}
       <div
@@ -4242,6 +4467,47 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onOpenGameMode={() => setShowGameMode(true)}
         />
       </div>
+
+      {/* Agent animation controls */}
+      {animAgents && (
+        <div className="pointer-events-auto absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl border border-[#D7D7D7] bg-white px-5 py-3 shadow-xl">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="9" />
+            </svg>
+          </div>
+          <div className="text-sm text-stone-700">
+            Animating <span className="font-semibold text-violet-700">{animAgents.length.toLocaleString()}</span> agents
+          </div>
+          {animClockLabel && (
+            <div className="rounded-lg bg-stone-900 px-2.5 py-1 font-mono text-sm font-semibold text-white tabular-nums">
+              {animClockLabel}
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-[11px] text-stone-400">
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> Low-income</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Mid-income</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-cyan-500" /> High-income</span>
+          </div>
+          <button
+            onClick={() => {
+              setAnimAgents(null);
+            }}
+            className="ml-2 rounded-lg px-3 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 transition-colors"
+          >
+            Stop
+          </button>
+          <button
+            onClick={() => {
+              animStartRef.current = null;
+              setAnimAgents([...animAgents]);
+            }}
+            className="rounded-lg px-3 py-1 text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+          >
+            Replay
+          </button>
+        </div>
+      )}
     </div>
   );
 }

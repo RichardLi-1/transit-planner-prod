@@ -23,6 +23,7 @@ const SPEED_KMH: Record<Route["type"], number> = {
   lrt: 18,
   streetcar: 15,
   bus: 20,
+  go_train: 60,
 };
 
 const ALL_DAYS = [

@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .anthropic import SYSTEM_PROMPT, create_assistant, create_thread, stream_message
 from .council import run_council
+from .simulation import router as simulation_router
 
 
 @asynccontextmanager
@@ -149,6 +150,7 @@ async def council(body: CouncilRequest):
 
 
 app.include_router(api_router, prefix="/api")
+app.include_router(simulation_router)
 
 
 @app.get("/")

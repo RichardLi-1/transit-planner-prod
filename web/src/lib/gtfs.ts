@@ -33,6 +33,7 @@ const SPEED_KMH: Record<Route["type"], number> = {
   lrt:       18,
   streetcar: 15,
   bus:       20,
+  go_train:  60,
 };
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -103,10 +104,11 @@ function stopKey(stop: {
 /** Map our route type to the GTFS route_type integer. */
 function gtfsRouteType(type: Route["type"]): number {
   switch (type) {
-    case "subway":    return 1;   // Metro / subway
-    case "lrt":       return 0;   // Tram / LRT (standard tram type)
-    case "streetcar": return 900; // City tram / streetcar (GTFS extended type)
-    case "bus":       return 3;   // Bus
+    case "subway":    return 1;
+    case "lrt":       return 0;
+    case "streetcar": return 900;
+    case "bus":       return 3;
+    case "go_train":  return 2;   // Rail
   }
 }
 
