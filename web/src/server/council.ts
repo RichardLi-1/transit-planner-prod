@@ -240,10 +240,12 @@ async function* turn(
   yield { chunk: sse({ type: "agent_end", agent: agent.name }), full };
 }
 
-// Route-producing turn (planners, rebuttal, commission) — same as turn(), but uses
-// streamMessageWithTool so the model is *forced* to call propose_route. The route
-// arrives as a validated JSON object in the final { type: "tool" } chunk, not parsed
-// from free-form text. `route` is null on every yield except the last (agent_end).
+// Route-producing turn (planners, rebuttal, commission) — two-step approach:
+// Step 1: stream the written analysis via streamMessage so text is always visible.
+// Step 2: force the propose_route tool call via streamMessageWithTool to get the
+// validated route JSON. Splitting into two calls guarantees text_delta events fire
+// before the tool call, preventing the "waiting" state when tool_choice causes the
+// model to skip text and call the tool immediately.
 async function* turnWithRoute(
   agent: Agent,
   threadId: string,
@@ -254,10 +256,23 @@ async function* turnWithRoute(
   let full = "";
   let route: Record<string, unknown> | null = null;
 
+  // Step 1: stream the analysis text (no tool forcing — guarantees text output)
+  for await (const text of getProvider(providerName).streamMessage(
+    threadId, prompt, agent.model, agent.maxTokens,
+  )) {
+    full += text;
+    yield { chunk: sse({ type: "agent_text", agent: agent.name, text }), full, route: null };
+  }
+
+  // Step 2: force the tool call to extract the structured route JSON.
+  // The thread already has the analysis from step 1, so the model has full context.
   for await (const item of getProvider(providerName).streamMessageWithTool(
-    threadId, prompt, PROPOSE_ROUTE_TOOL, agent.model, agent.maxTokens,
+    threadId,
+    "Now call the propose_route tool with your recommended route based on your analysis above.",
+    PROPOSE_ROUTE_TOOL, agent.model, agent.maxTokens,
   )) {
     if (item.type === "text") {
+      // Model may add brief text in step 2 — append it
       full += item.text;
       yield { chunk: sse({ type: "agent_text", agent: agent.name, text: item.text }), full, route: null };
     } else {
