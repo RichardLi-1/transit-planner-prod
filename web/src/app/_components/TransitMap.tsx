@@ -1489,10 +1489,11 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       void (async () => {
         try {
           const { snapToRoads } = await import("~/lib/road-snap");
+          const snapProfile = (route.type === "bus" || route.type === "streetcar") ? "walking" : "driving";
           const shape = await snapToRoads(route.stops, TOKEN, (pct) => {
             if (pct === 100) return; // handled below
             setSnapProgress((p) => p?.routeId === routeId ? { routeId, pct: Math.max(pct, 5) } : p);
-          });
+          }, snapProfile);
           clearTimeout(progressTimer);
           // Check against routesRef (current stops) before applying — discard stale snaps
           const currentKey = routesRef.current.find((r) => r.id === routeId)?.stops.map((s) => s.coords.join(",")).join("|");

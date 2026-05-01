@@ -23,11 +23,11 @@ interface MapMatchingResponse {
   }>;
 }
 
-async function matchChunk(coords: Coord[], token: string): Promise<Coord[]> {
+async function matchChunk(coords: Coord[], token: string, profile: string): Promise<Coord[]> {
   const coordStr   = coords.map(([lng, lat]) => `${lng},${lat}`).join(";");
   const radiusStr  = coords.map(() => SNAP_RADIUS_M).join(";");
   const url =
-    `https://api.mapbox.com/matching/v5/mapbox/driving/${coordStr}` +
+    `https://api.mapbox.com/matching/v5/mapbox/${profile}/${coordStr}` +
     `?geometries=geojson&overview=full&radiuses=${radiusStr}&access_token=${token}`;
 
   const res = await fetch(url);
@@ -66,6 +66,7 @@ export async function snapToRoads(
   stops: { coords: Coord }[],
   token: string,
   onProgress?: (pct: number) => void,
+  profile = "driving",
 ): Promise<Coord[]> {
   if (stops.length < 2) {
     throw new Error("Need at least 2 stops to snap to roads.");
@@ -76,7 +77,7 @@ export async function snapToRoads(
 
   // Single request for short routes
   if (coords.length <= MAX_WAYPOINTS) {
-    const result = await matchChunk(coords, token);
+    const result = await matchChunk(coords, token, profile);
     onProgress?.(100);
     return result;
   }
@@ -87,7 +88,7 @@ export async function snapToRoads(
   const result: Coord[] = [];
   for (let i = 0; i < coords.length; i += MAX_WAYPOINTS - 1) {
     const chunk     = coords.slice(i, i + MAX_WAYPOINTS);
-    const snapped   = await matchChunk(chunk, token);
+    const snapped   = await matchChunk(chunk, token, profile);
     chunkIdx++;
     onProgress?.(Math.round((chunkIdx / totalChunks) * 100));
     if (result.length === 0) {
