@@ -17,7 +17,6 @@ function GreatCircleOrbit({ color, normal, speed, phases, r = 6.01 }: {
   phases: number[];
   r?: number;
 }) {
-	console.log("logging the great circle")
   const R = r;
 
   // Two orthonormal basis vectors spanning the orbit plane
@@ -193,7 +192,6 @@ export default function LandingPage() {
   }, []);
 
   useEffect(() => {
-  console.log("Setting ready")
     setReady(true);
     const t = setTimeout(() => setVisible(true), 60);
     // Prefetch map page JS bundle + heavy data assets
