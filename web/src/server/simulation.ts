@@ -867,7 +867,10 @@ function equityScore(agents: SimAgent[], legResults: LegRouteResult[]): number {
   }
   let weightedAccessible = 0, weightedTotal = 0;
   for (const [, r] of agentCommute) {
-    const w = (IW[r.income] ?? 1) * r.transitDep;
+    // Infeasible agents have no transit option — they are fully car-dependent by
+    // necessity regardless of their sampled transitDep, so count them at full weight.
+    const effectiveDep = r.feasible ? r.transitDep : 1.0;
+    const w = (IW[r.income] ?? 1) * effectiveDep;
     weightedTotal += w;
     if (r.feasible) weightedAccessible += w;
   }
