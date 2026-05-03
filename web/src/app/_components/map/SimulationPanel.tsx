@@ -43,19 +43,19 @@ export interface StressSegment {
   edge_pk?: number;
 }
 
-export type TimeWindow = "morning" | "evening" | "full_day";
-
 export interface PerAgentResult {
+  agent_id: number;
   home_lon: number;
   home_lat: number;
   income: string;
   transit_dep: number;
+  persona: string;
+  purpose: string;
   baseline_time: number;
   scenario_time: number;
   time_saved_min: number;
   newly_accessible: boolean;
   departure_min: number;
-  direction: "to_work" | "to_home";
   path_coords: [number, number][];
 }
 
@@ -64,7 +64,7 @@ export interface SimulationResult {
   agent_count: number;
   run_duration_s: number;
   has_proposed_lines: boolean;
-  time_window: TimeWindow;
+  time_range: { start_min: number; end_min: number };
   baseline: RunStats;
   scenario: RunStats;
   delta: DeltaStats;
@@ -86,6 +86,20 @@ export interface SimulationPanelProps {
   onClose: () => void;
   onResults: (result: SimulationResult | null) => void;
   onAnimate: (agents: PerAgentResult[]) => void;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+const MIN_TIME = 360;   // 6:00am
+const MAX_TIME = 1440;  // midnight
+const STEP     = 30;    // 30-min steps
+
+function fmtMin(m: number): string {
+  const h = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  const period = h < 12 ? "am" : "pm";
+  const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return mm === 0 ? `${display}${period}` : `${display}:${String(mm).padStart(2, "0")}${period}`;
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -160,11 +174,9 @@ function ScoreBadge({ label, value, color }: { label: string; value: number; col
 
 function StressBar({ segment }: { segment: StressSegment }) {
   const color =
-    segment.stress_pct > 75
-      ? "#ef4444"
-      : segment.stress_pct > 40
-      ? "#f59e0b"
-      : "#10b981";
+    segment.stress_pct > 75 ? "#ef4444"
+    : segment.stress_pct > 40 ? "#f59e0b"
+    : "#10b981";
 
   return (
     <div className="flex items-center gap-2 py-1">
@@ -178,10 +190,7 @@ function StressBar({ segment }: { segment: StressSegment }) {
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         <div className="w-16 h-1.5 rounded-full bg-stone-100">
-          <div
-            className="h-full rounded-full"
-            style={{ width: `${segment.stress_pct}%`, backgroundColor: color }}
-          />
+          <div className="h-full rounded-full" style={{ width: `${segment.stress_pct}%`, backgroundColor: color }} />
         </div>
         <span className="text-[10px] font-mono text-stone-500 w-8 text-right">
           {segment.stress_pct.toFixed(0)}%
@@ -191,20 +200,83 @@ function StressBar({ segment }: { segment: StressSegment }) {
   );
 }
 
+// Dual-handle range slider
+function TimeRangeSlider({
+  startMin, endMin,
+  onStartChange, onEndChange,
+}: {
+  startMin: number; endMin: number;
+  onStartChange: (v: number) => void;
+  onEndChange:   (v: number) => void;
+}) {
+  const range = MAX_TIME - MIN_TIME;
+  const leftPct  = ((startMin - MIN_TIME) / range) * 100;
+  const rightPct = ((endMin   - MIN_TIME) / range) * 100;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs font-medium text-stone-700">
+        <span>{fmtMin(startMin)}</span>
+        <span>{fmtMin(endMin)}</span>
+      </div>
+
+      {/* Track */}
+      <div className="relative h-5 flex items-center">
+        <div className="absolute inset-x-0 h-1.5 rounded-full bg-stone-200" />
+        {/* Highlighted range */}
+        <div
+          className="absolute h-1.5 rounded-full bg-violet-500"
+          style={{ left: `${leftPct}%`, right: `${100 - rightPct}%` }}
+        />
+        {/* Start handle */}
+        <input
+          type="range"
+          min={MIN_TIME} max={MAX_TIME - STEP} step={STEP}
+          value={startMin}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (v < endMin) onStartChange(v);
+          }}
+          className="absolute inset-0 w-full appearance-none bg-transparent cursor-pointer"
+          style={{ zIndex: startMin >= endMin - STEP ? 5 : 3 }}
+        />
+        {/* End handle */}
+        <input
+          type="range"
+          min={MIN_TIME + STEP} max={MAX_TIME} step={STEP}
+          value={endMin}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (v > startMin) onEndChange(v);
+          }}
+          className="absolute inset-0 w-full appearance-none bg-transparent cursor-pointer"
+          style={{ zIndex: 4 }}
+        />
+      </div>
+
+      {/* Tick labels */}
+      <div className="flex justify-between text-[9px] text-stone-400">
+        <span>6am</span>
+        <span>9am</span>
+        <span>12pm</span>
+        <span>3pm</span>
+        <span>6pm</span>
+        <span>9pm</span>
+        <span>12am</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
-const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string; sub: string }[] = [
-  { value: "morning",  label: "Morning commute",  sub: "Depart 7:00–9:30am" },
-  { value: "evening",  label: "Evening commute",  sub: "Depart 4:00–6:30pm" },
-  { value: "full_day", label: "Full day",          sub: "Both peaks combined" },
-];
-
 export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }: SimulationPanelProps) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SimulationResult | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [result, setResult]       = useState<SimulationResult | null>(null);
   const [agentCount, setAgentCount] = useState(500);
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("morning");
+  const [startMin, setStartMin]   = useState(360);   // 6:00am
+  const [endMin, setEndMin]       = useState(1440);  // midnight
   const [activeTab, setActiveTab] = useState<"overview" | "equity" | "stress" | "narrative">("overview");
 
   const hasProposed = customRoutes.length > 0;
@@ -231,7 +303,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
           agent_count: agentCount,
           scenario_name: scenarioName,
           narrate: hasProposed,
-          time_window: timeWindow,
+          time_range: { start_min: startMin, end_min: endMin },
         }),
       });
 
@@ -249,19 +321,15 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
     } finally {
       setLoading(false);
     }
-  }, [customRoutes, agentCount, scenarioName, hasProposed, timeWindow, onResults]);
+  }, [customRoutes, agentCount, scenarioName, hasProposed, startMin, endMin, onResults]);
 
-  const handleClose = () => {
-    onResults(null);
-    onClose();
-  };
+  const handleClose = () => { onResults(null); onClose(); };
 
-  // Tabs available depend on whether there are proposed lines
   type TabId = "overview" | "equity" | "stress" | "narrative";
   const tabs: { id: TabId; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "equity",   label: "Equity" },
-    { id: "stress",   label: "Stress" },
+    { id: "overview",  label: "Overview" },
+    { id: "equity",    label: "Equity" },
+    { id: "stress",    label: "Stress" },
     ...(result?.has_proposed_lines ? [{ id: "narrative" as TabId, label: "Analysis" }] : []),
   ];
 
@@ -278,20 +346,16 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
           </div>
           <span className="text-sm font-semibold text-stone-800">Agent Simulation</span>
         </div>
-        <button
-          onClick={handleClose}
-          className="text-stone-400 hover:text-stone-600 transition-colors"
-        >
+        <button onClick={handleClose} className="text-stone-400 hover:text-stone-600 transition-colors">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 6 6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
 
-      {/* Config row */}
+      {/* Config */}
       {!result && (
         <div className="px-4 py-3 border-b border-stone-100 bg-stone-50 space-y-3">
-          {/* What will be simulated */}
           <div>
             <p className="text-xs font-medium text-stone-600 mb-1">
               {hasProposed ? "Comparing against proposed lines" : "Simulating existing network"}
@@ -312,25 +376,13 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
             )}
           </div>
 
-          {/* Time window selector */}
+          {/* Time range slider */}
           <div>
-            <p className="text-xs font-medium text-stone-600 mb-1.5">Time window</p>
-            <div className="grid grid-cols-3 gap-1">
-              {TIME_WINDOW_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setTimeWindow(opt.value)}
-                  className={`rounded-lg px-2 py-1.5 text-left transition-all ${
-                    timeWindow === opt.value
-                      ? "bg-violet-600 text-white"
-                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                  }`}
-                >
-                  <p className="text-[10px] font-semibold leading-tight">{opt.label}</p>
-                  <p className={`text-[9px] leading-tight mt-0.5 ${timeWindow === opt.value ? "text-violet-200" : "text-stone-400"}`}>{opt.sub}</p>
-                </button>
-              ))}
-            </div>
+            <p className="text-xs font-medium text-stone-600 mb-2">Simulate time range</p>
+            <TimeRangeSlider
+              startMin={startMin} endMin={endMin}
+              onStartChange={setStartMin} onEndChange={setEndMin}
+            />
           </div>
 
           {/* Agent count slider */}
@@ -340,9 +392,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
             </label>
             <input
               type="range"
-              min={100}
-              max={2000}
-              step={100}
+              min={100} max={2000} step={100}
               value={agentCount}
               onChange={(e) => setAgentCount(Number(e.target.value))}
               className="mt-1 w-full accent-violet-600"
@@ -362,11 +412,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                 : "bg-violet-600 text-white hover:bg-violet-700 active:scale-[0.98]"
             }`}
           >
-            {loading
-              ? "Running simulation…"
-              : hasProposed
-              ? "Run Scenario Comparison"
-              : "Run Baseline Simulation"}
+            {loading ? "Running simulation…" : hasProposed ? "Run Scenario Comparison" : "Run Baseline Simulation"}
           </button>
 
           {loading && (
@@ -391,7 +437,6 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
       {/* Results */}
       {result && (
         <>
-          {/* Tab bar */}
           <div className="flex border-b border-stone-100 bg-stone-50 text-xs font-medium">
             {tabs.map((tab) => (
               <button
@@ -410,77 +455,36 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
 
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 max-h-[calc(100vh-260px)]">
 
-            {/* ── Overview tab ── */}
             {activeTab === "overview" && (
               <div className="space-y-3">
-                {/* Delta hero — only shown when there are proposed lines */}
                 {result.has_proposed_lines && (
                   <div className="grid grid-cols-2 gap-2">
                     <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3 text-center">
                       <p className="text-[10px] text-emerald-600 uppercase tracking-wide mb-0.5">Time saved</p>
                       <p className="text-2xl font-bold text-emerald-700">
-                        {result.delta.total_time_saved_min > 0
-                          ? result.delta.total_time_saved_min.toFixed(1)
-                          : "–"}
+                        {result.delta.total_time_saved_min > 0 ? result.delta.total_time_saved_min.toFixed(1) : "–"}
                       </p>
                       <p className="text-[10px] text-emerald-500">min avg</p>
                     </div>
                     <div className="rounded-xl bg-violet-50 border border-violet-100 p-3 text-center">
                       <p className="text-[10px] text-violet-600 uppercase tracking-wide mb-0.5">Newly reached</p>
-                      <p className="text-2xl font-bold text-violet-700">
-                        {result.delta.newly_accessible_agents}
-                      </p>
+                      <p className="text-2xl font-bold text-violet-700">{result.delta.newly_accessible_agents}</p>
                       <p className="text-[10px] text-violet-500">agents</p>
                     </div>
                   </div>
                 )}
 
-                {/* Stat table */}
                 <div className="rounded-xl border border-stone-100 px-3 py-2">
-                  <StatRow
-                    label="Transit accessible"
-                    baseline={result.baseline.pct_accessible}
-                    scenario={result.scenario.pct_accessible}
-                    unit="%"
-                    better="higher"
-                    hideScenario={!result.has_proposed_lines}
-                  />
-                  <StatRow
-                    label="Avg transit time"
-                    baseline={result.baseline.avg_transit_time_min}
-                    scenario={result.scenario.avg_transit_time_min}
-                    unit=" min"
-                    better="lower"
-                    hideScenario={!result.has_proposed_lines}
-                  />
-                  <StatRow
-                    label="Avg door-to-door"
-                    baseline={result.baseline.avg_total_time_min}
-                    scenario={result.scenario.avg_total_time_min}
-                    unit=" min"
-                    better="lower"
-                    hideScenario={!result.has_proposed_lines}
-                  />
-                  <StatRow
-                    label="P90 transit time"
-                    baseline={result.baseline.p90_transit_time_min}
-                    scenario={result.scenario.p90_transit_time_min}
-                    unit=" min"
-                    better="lower"
-                    hideScenario={!result.has_proposed_lines}
-                  />
-                  <StatRow
-                    label="Avg transfers"
-                    baseline={result.baseline.avg_transfers}
-                    scenario={result.scenario.avg_transfers}
-                    better="lower"
-                    hideScenario={!result.has_proposed_lines}
-                  />
+                  <StatRow label="Transit accessible" baseline={result.baseline.pct_accessible} scenario={result.scenario.pct_accessible} unit="%" better="higher" hideScenario={!result.has_proposed_lines} />
+                  <StatRow label="Avg transit time"   baseline={result.baseline.avg_transit_time_min} scenario={result.scenario.avg_transit_time_min} unit=" min" better="lower" hideScenario={!result.has_proposed_lines} />
+                  <StatRow label="Avg door-to-door"   baseline={result.baseline.avg_total_time_min} scenario={result.scenario.avg_total_time_min} unit=" min" better="lower" hideScenario={!result.has_proposed_lines} />
+                  <StatRow label="P90 transit time"   baseline={result.baseline.p90_transit_time_min} scenario={result.scenario.p90_transit_time_min} unit=" min" better="lower" hideScenario={!result.has_proposed_lines} />
+                  <StatRow label="Avg transfers"      baseline={result.baseline.avg_transfers} scenario={result.scenario.avg_transfers} better="lower" hideScenario={!result.has_proposed_lines} />
                 </div>
 
+                {/* Time range badge */}
                 <p className="text-[10px] text-stone-400 text-center">
-                  {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s ·{" "}
-                  {result.graph_stats.baseline_nodes.toLocaleString()} stops in graph
+                  {fmtMin(result.time_range.start_min)}–{fmtMin(result.time_range.end_min)} · {result.per_agent.length.toLocaleString()} legs shown · {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s
                 </p>
 
                 <button
@@ -499,21 +503,12 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
               </div>
             )}
 
-            {/* ── Equity tab ── */}
             {activeTab === "equity" && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <ScoreBadge
-                    label={result.has_proposed_lines ? "Baseline equity score" : "Equity score"}
-                    value={result.equity.baseline_score}
-                    color={result.has_proposed_lines ? "#94a3b8" : "#7c3aed"}
-                  />
+                  <ScoreBadge label={result.has_proposed_lines ? "Baseline equity score" : "Equity score"} value={result.equity.baseline_score} color={result.has_proposed_lines ? "#94a3b8" : "#7c3aed"} />
                   {result.has_proposed_lines && (
-                    <ScoreBadge
-                      label="Scenario equity score"
-                      value={result.equity.scenario_score}
-                      color="#7c3aed"
-                    />
+                    <ScoreBadge label="Scenario equity score" value={result.equity.scenario_score} color="#7c3aed" />
                   )}
                 </div>
 
@@ -526,15 +521,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                     const s = result.scenario.income_breakdown[inc];
                     if (!b) return null;
                     return (
-                      <StatRow
-                        key={inc}
-                        label={`${inc.charAt(0).toUpperCase() + inc.slice(1)}-income`}
-                        baseline={b}
-                        scenario={s ?? b}
-                        unit=" min"
-                        better="lower"
-                        hideScenario={!result.has_proposed_lines}
-                      />
+                      <StatRow key={inc} label={`${inc.charAt(0).toUpperCase() + inc.slice(1)}-income`} baseline={b} scenario={s ?? b} unit=" min" better="lower" hideScenario={!result.has_proposed_lines} />
                     );
                   })}
                 </div>
@@ -549,64 +536,44 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
               </div>
             )}
 
-            {/* ── Stress tab ── */}
             {activeTab === "stress" && (
               <div className="space-y-3">
-                {/* Proposed line stress */}
                 {result.has_proposed_lines && result.line_stress.length > 0 && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">
-                      Proposed line load
-                    </p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">Proposed line load</p>
                     <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50">
-                      {result.line_stress.map((seg, i) => (
-                        <StressBar key={i} segment={seg} />
-                      ))}
+                      {result.line_stress.map((seg, i) => <StressBar key={i} segment={seg} />)}
                     </div>
                   </div>
                 )}
 
-                {/* Existing network stress */}
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">
                     {result.has_proposed_lines ? "Busiest existing segments" : "Network stress (busiest segments)"}
                   </p>
                   {result.baseline_edge_stress.length === 0 ? (
-                    <p className="text-xs text-stone-400 py-2 text-center">No stress data — agents may not be routing through existing stops.</p>
+                    <p className="text-xs text-stone-400 py-2 text-center">No stress data.</p>
                   ) : (
                     <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50 max-h-64 overflow-y-auto">
-                      {result.baseline_edge_stress.map((seg, i) => (
-                        <StressBar key={i} segment={seg} />
-                      ))}
+                      {result.baseline_edge_stress.map((seg, i) => <StressBar key={i} segment={seg} />)}
                     </div>
                   )}
                 </div>
 
                 <div className="flex gap-3 text-[10px] text-stone-400">
-                  <span className="flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Low
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-amber-400" /> Medium
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-red-500" /> High
-                  </span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Low</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Medium</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> High</span>
                 </div>
               </div>
             )}
 
-            {/* ── Narrative tab (only when proposed lines) ── */}
             {activeTab === "narrative" && result.has_proposed_lines && (
               <div className="space-y-3">
                 {result.narrative ? (
-                  <div className="text-xs text-stone-600 leading-relaxed whitespace-pre-line">
-                    {result.narrative}
-                  </div>
+                  <div className="text-xs text-stone-600 leading-relaxed whitespace-pre-line">{result.narrative}</div>
                 ) : (
-                  <p className="text-xs text-stone-400 text-center py-4">
-                    No narrative generated (API key not set or narration disabled).
-                  </p>
+                  <p className="text-xs text-stone-400 text-center py-4">No narrative generated.</p>
                 )}
               </div>
             )}

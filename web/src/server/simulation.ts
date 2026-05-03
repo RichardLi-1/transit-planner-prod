@@ -1,11 +1,10 @@
 /**
  * Self-contained transit simulation engine.
  *
- * Builds a transit graph from the existing ROUTES / BUS_ROUTES / GO_TRAIN_ROUTES
- * constants (which have real geocoded stop coordinates), routes synthetic agents
- * through it using Dijkstra, and scores baseline vs scenario comparisons.
- *
- * No Python server or direct DB connection required.
+ * Agents are assigned a persona (worker, student, senior, shift_worker, parent)
+ * and generate a full day of trip legs (commute + optional activities).
+ * The caller specifies a timeRange {startMin, endMin} to filter which legs
+ * are shown in the animation and per-agent output.
  */
 import "server-only";
 
@@ -15,28 +14,27 @@ import { supabase } from "./supabase";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const WALK_TRANSFER_M = 400;    // max walk to transfer between lines
-const ACCESS_WALK_M   = 800;    // max walk from home/work to a stop
+const WALK_TRANSFER_M = 400;
+const ACCESS_WALK_M   = 800;
 const WALK_SPEED_MPS  = 5 / 3.6;
 
-// ── Time windows ──────────────────────────────────────────────────────────────
-export type TimeWindow = "morning" | "evening" | "full_day";
+// ── Persona & purpose types ───────────────────────────────────────────────────
 
-// Peak periods (minutes from midnight):
-//   Morning peak  : 7:00–9:30am  (420–570) — transit ~45% slower, cars ~55% slower
-//   Evening peak  : 4:30–7:00pm  (990–1140)
-//   Shoulder      : 30-min ramps either side
+export type Persona     = "worker" | "student" | "senior" | "shift_worker" | "parent";
+export type TripPurpose = "commute" | "lunch" | "shopping" | "social" | "medical" | "errand" | "return";
+
+// ── Peak periods ──────────────────────────────────────────────────────────────
+
 const PEAK_PERIODS = {
-  morningStart:  420, // 7:00am
-  morningEnd:    570, // 9:30am
-  eveningStart:  990, // 4:30pm
-  eveningEnd:   1140, // 7:00pm
+  morningStart:  420,
+  morningEnd:    570,
+  eveningStart:  990,
+  eveningEnd:   1140,
 } as const;
 
-// Congestion multiplier for car travel: 1.0 = free flow, 0.5 = half speed
 function congestionMultiplierAt(departureMin: number): number {
   const { morningStart, morningEnd, eveningStart, eveningEnd } = PEAK_PERIODS;
-  const RAMP = 30; // minutes to ramp up/down
+  const RAMP = 30;
   const PEAK_MULT = 0.55;
   if ((departureMin >= morningStart && departureMin <= morningEnd) ||
       (departureMin >= eveningStart && departureMin <= eveningEnd)) return PEAK_MULT;
@@ -51,17 +49,18 @@ function congestionMultiplierAt(departureMin: number): number {
   return 1.0;
 }
 
-// CLT-based normal approximation using seeded PRNG (sum of 6 uniforms)
 function sampleNormal(rand: () => number, mean: number, sd: number): number {
   let s = 0;
   for (let i = 0; i < 6; i++) s += rand();
   return mean + ((s - 3) / 0.7071) * sd;
 }
-// Car speed varies by distance from downtown core:
-//   0–3 km  : ~20 km/h (matches bus speed — gridlock)
-//   3–8 km  : ~28 km/h (inner suburbs, still congested)
-//   8–15 km : ~35 km/h (mid suburbs)
-//   15+ km  : ~45 km/h (outer suburbs, expressway access)
+
+function clampNormal(rand: () => number, mean: number, sd: number, lo: number, hi: number): number {
+  return Math.round(Math.max(lo, Math.min(hi, sampleNormal(rand, mean, sd))));
+}
+
+// ── Car speed zones ───────────────────────────────────────────────────────────
+
 const CAR_SPEED_ZONES: { maxDistM: number; speedKmh: number }[] = [
   { maxDistM:  3_000, speedKmh: 20 },
   { maxDistM:  8_000, speedKmh: 28 },
@@ -71,7 +70,8 @@ const CAR_SPEED_ZONES: { maxDistM: number; speedKmh: number }[] = [
 const DOWNTOWN_LON = -79.382;
 const DOWNTOWN_LAT =  43.649;
 
-// Transit speeds by route type
+// ── Transit speeds ────────────────────────────────────────────────────────────
+
 const SPEED: Record<Route["type"], number> = {
   subway:    35,
   lrt:       25,
@@ -80,7 +80,6 @@ const SPEED: Record<Route["type"], number> = {
   go_train:  60,
 };
 
-// Boarding wait penalty (minutes) per route type
 const BOARD_PENALTY: Record<Route["type"], number> = {
   subway:    2,
   lrt:       2.5,
@@ -89,10 +88,8 @@ const BOARD_PENALTY: Record<Route["type"], number> = {
   go_train:  5,
 };
 
-// ── Employment clusters (Toronto) ─────────────────────────────────────────────
+// ── Destination clusters ──────────────────────────────────────────────────────
 
-// Work destinations — intentionally downtown-heavy.
-// Union/King/Queen/Financial District absorb ~50% of all commuters.
 const WORK_CLUSTERS: { name: string; lon: number; lat: number; weight: number }[] = [
   { name: "Union / Financial District", lon: -79.381, lat: 43.645, weight: 0.22 },
   { name: "King West / Entertainment",  lon: -79.396, lat: 43.644, weight: 0.12 },
@@ -109,10 +106,114 @@ const WORK_CLUSTERS: { name: string; lon: number; lat: number; weight: number }[
   { name: "Local (same area)",          lon: null as unknown as number, lat: null as unknown as number, weight: 0.13 },
 ];
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+const SCHOOL_CLUSTERS: { name: string; lon: number; lat: number }[] = [
+  { name: "University of Toronto",    lon: -79.397, lat: 43.665 },
+  { name: "Toronto Metropolitan Univ",lon: -79.379, lat: 43.658 },
+  { name: "York University",          lon: -79.502, lat: 43.773 },
+  { name: "OCAD University",          lon: -79.391, lat: 43.653 },
+  { name: "George Brown College",     lon: -79.375, lat: 43.648 },
+  { name: "Humber College North",     lon: -79.608, lat: 43.729 },
+  { name: "Centennial College",       lon: -79.244, lat: 43.784 },
+  { name: "Seneca College Newnham",   lon: -79.352, lat: 43.796 },
+];
+
+const DEST_POOLS: Record<string, { name: string; lon: number; lat: number }[]> = {
+  food_market: [
+    { name: "St. Lawrence Market",  lon: -79.371, lat: 43.648 },
+    { name: "Kensington Market",    lon: -79.402, lat: 43.655 },
+    { name: "Chinatown",            lon: -79.399, lat: 43.653 },
+    { name: "Little Italy",         lon: -79.414, lat: 43.655 },
+    { name: "Distillery District",  lon: -79.359, lat: 43.650 },
+    { name: "Danforth Village",     lon: -79.325, lat: 43.678 },
+    { name: "Bloor West Village",   lon: -79.468, lat: 43.651 },
+  ],
+  shopping: [
+    { name: "Eaton Centre",         lon: -79.380, lat: 43.654 },
+    { name: "Yorkdale Mall",        lon: -79.451, lat: 43.725 },
+    { name: "Scarborough TC",       lon: -79.259, lat: 43.775 },
+    { name: "Fairview Mall",        lon: -79.331, lat: 43.778 },
+    { name: "Sherway Gardens",      lon: -79.566, lat: 43.614 },
+    { name: "Square One",           lon: -79.644, lat: 43.593 },
+  ],
+  entertainment: [
+    { name: "King West",            lon: -79.400, lat: 43.644 },
+    { name: "Distillery District",  lon: -79.359, lat: 43.650 },
+    { name: "Ossington Strip",      lon: -79.425, lat: 43.649 },
+    { name: "Bloor West Village",   lon: -79.468, lat: 43.651 },
+    { name: "The Danforth",         lon: -79.325, lat: 43.678 },
+    { name: "Kensington Market",    lon: -79.402, lat: 43.655 },
+    { name: "College Street",       lon: -79.415, lat: 43.655 },
+  ],
+  park: [
+    { name: "High Park",            lon: -79.464, lat: 43.647 },
+    { name: "Riverdale Park",       lon: -79.350, lat: 43.670 },
+    { name: "Trinity Bellwoods",    lon: -79.416, lat: 43.648 },
+    { name: "Centennial Park",      lon: -79.568, lat: 43.644 },
+    { name: "Rouge Park",           lon: -79.158, lat: 43.814 },
+    { name: "Tommy Thompson",       lon: -79.328, lat: 43.636 },
+  ],
+  medical: [
+    { name: "Toronto General",      lon: -79.388, lat: 43.659 },
+    { name: "Sunnybrook Hospital",  lon: -79.375, lat: 43.723 },
+    { name: "St Michael's Hospital",lon: -79.376, lat: 43.652 },
+    { name: "Scarborough Health",   lon: -79.244, lat: 43.781 },
+    { name: "Humber River Hospital",lon: -79.527, lat: 43.747 },
+  ],
+};
+
+// ── Day profile types & default ───────────────────────────────────────────────
+
+interface DayProfileEntry {
+  probability: number;
+  departure: { mean: number; sd: number };
+  destPool: string;
+  socialPull: number;   // 0=prefer nearby, 1=go anywhere
+  anchor: "home" | "work";
+  durationMin: { mean: number; sd: number };
+  purpose: TripPurpose;
+}
+
+type DayProfile = Partial<Record<Persona, Record<string, DayProfileEntry>>>;
+
+const DEFAULT_DAY_PROFILE: Required<DayProfile> = {
+  worker: {
+    lunch_local:    { probability: 0.50, departure: { mean: 720,  sd: 20 }, destPool: "nearby",        socialPull: 0.10, anchor: "work", durationMin: { mean: 45,  sd: 10 }, purpose: "lunch"    },
+    lunch_out:      { probability: 0.25, departure: { mean: 720,  sd: 25 }, destPool: "food_market",   socialPull: 0.45, anchor: "work", durationMin: { mean: 70,  sd: 15 }, purpose: "lunch"    },
+    evening_shop:   { probability: 0.20, departure: { mean: 1050, sd: 45 }, destPool: "shopping",      socialPull: 0.25, anchor: "work", durationMin: { mean: 60,  sd: 20 }, purpose: "shopping" },
+    evening_social: { probability: 0.15, departure: { mean: 1170, sd: 60 }, destPool: "entertainment", socialPull: 0.55, anchor: "home", durationMin: { mean: 120, sd: 30 }, purpose: "social"   },
+  },
+  student: {
+    lunch:          { probability: 0.60, departure: { mean: 750,  sd: 30 }, destPool: "food_market",   socialPull: 0.30, anchor: "work", durationMin: { mean: 60,  sd: 20 }, purpose: "lunch"    },
+    social_aft:     { probability: 0.40, departure: { mean: 960,  sd: 60 }, destPool: "entertainment", socialPull: 0.55, anchor: "work", durationMin: { mean: 90,  sd: 30 }, purpose: "social"   },
+    evening_out:    { probability: 0.30, departure: { mean: 1140, sd: 60 }, destPool: "entertainment", socialPull: 0.65, anchor: "home", durationMin: { mean: 120, sd: 40 }, purpose: "social"   },
+  },
+  senior: {
+    morning_errand: { probability: 0.50, departure: { mean: 630,  sd: 30 }, destPool: "food_market",   socialPull: 0.20, anchor: "home", durationMin: { mean: 60,  sd: 20 }, purpose: "errand"   },
+    morning_med:    { probability: 0.25, departure: { mean: 600,  sd: 45 }, destPool: "medical",       socialPull: 0.15, anchor: "home", durationMin: { mean: 90,  sd: 20 }, purpose: "medical"  },
+    aft_social:     { probability: 0.35, departure: { mean: 840,  sd: 60 }, destPool: "park",          socialPull: 0.20, anchor: "home", durationMin: { mean: 90,  sd: 30 }, purpose: "social"   },
+  },
+  shift_worker: {
+    errand:         { probability: 0.40, departure: { mean: 900,  sd: 60 }, destPool: "food_market",   socialPull: 0.25, anchor: "home", durationMin: { mean: 45,  sd: 15 }, purpose: "errand"   },
+  },
+  parent: {
+    evening_shop:   { probability: 0.35, departure: { mean: 1020, sd: 30 }, destPool: "shopping",      socialPull: 0.15, anchor: "work", durationMin: { mean: 45,  sd: 15 }, purpose: "shopping" },
+    evening_social: { probability: 0.20, departure: { mean: 1080, sd: 60 }, destPool: "entertainment", socialPull: 0.30, anchor: "home", durationMin: { mean: 90,  sd: 30 }, purpose: "social"   },
+  },
+};
+
+// ── Graph types ───────────────────────────────────────────────────────────────
+
+interface AgentLeg {
+  purpose: TripPurpose;
+  departureMin: number;
+  originLon: number;
+  originLat: number;
+  destLon: number;
+  destLat: number;
+}
 
 interface GraphStop {
-  id: number;           // unique integer ID used as graph key
+  id: number;
   name: string;
   lon: number;
   lat: number;
@@ -122,7 +223,7 @@ interface GraphStop {
 
 interface GraphEdge {
   to: number;
-  weight: number;       // minutes
+  weight: number;
   kind: "transit" | "walk" | "proposed";
   routeName: string;
   fromLon: number; fromLat: number;
@@ -133,6 +234,8 @@ interface GraphEdge {
 
 type Graph = Map<number, GraphEdge[]>;
 
+// ── Public-facing types ───────────────────────────────────────────────────────
+
 export interface SimAgent {
   id: number;
   homeLon: number;
@@ -142,22 +245,33 @@ export interface SimAgent {
   income: "low" | "mid" | "high";
   transitDep: number;
   workCluster: string;
-  // Time fields — minutes from midnight
-  departureMin: number;   // when they leave home (AM) or work (PM)
-  direction: "to_work" | "to_home";
+  persona: Persona;
+  legs: AgentLeg[];
 }
 
-export interface TripResult {
+interface EdgeRecord {
+  fromName: string; toName: string;
+  fromLon: number; fromLat: number;
+  toLon: number;   toLat: number;
+  kind: string; routeName: string;
+}
+
+interface LegRouteResult {
   agentId: number;
+  legIndex: number;
+  purpose: TripPurpose;
+  departureMin: number;
   feasible: boolean;
   totalMin: number;
   transitMin: number;
-  accessWalkMin: number;
-  egressWalkMin: number;
+  carMin: number;
   transfers: number;
   pathIds: number[];
-  carMin: number;
-  edgesUsed: { fromName: string; toName: string; fromLon: number; fromLat: number; toLon: number; toLat: number; kind: string; routeName: string }[];
+  edgesUsed: EdgeRecord[];
+  homeLon: number; homeLat: number;
+  income: "low" | "mid" | "high";
+  transitDep: number;
+  persona: Persona;
 }
 
 export interface ProposedLineStop { name: string; coords: [number, number] }
@@ -167,7 +281,7 @@ export interface SimulationResult {
   hasProposedLines: boolean;
   agentCount: number;
   runDurationS: number;
-  timeWindow: TimeWindow;
+  timeRange: { startMin: number; endMin: number };
   baseline: RunStats;
   scenario: RunStats;
   delta: DeltaStats;
@@ -209,16 +323,17 @@ interface DeltaStats {
 }
 
 interface PerAgentDelta {
+  agentId: number;
   homeLon: number; homeLat: number;
   income: string;
   transitDep: number;
+  persona: Persona;
+  purpose: TripPurpose;
+  departureMin: number;
   baselineTime: number;
   scenarioTime: number;
   timeSavedMin: number;
   newlyAccessible: boolean;
-  departureMin: number;
-  direction: "to_work" | "to_home";
-  // Full coordinate path for animation [[lon,lat], ...], empty if infeasible
   pathCoords: [number, number][];
 }
 
@@ -239,25 +354,20 @@ function walkMin(distM: number): number {
   return distM / WALK_SPEED_MPS / 60;
 }
 
-// Estimate car travel time by sampling the straight-line path in small steps
-// and applying the speed zone at each sample point's distance from downtown.
-function carTravelMin(homeLon: number, homeLat: number, workLon: number, workLat: number): number {
-  const totalDistM = haversineM(homeLon, homeLat, workLon, workLat);
+function carTravelMin(originLon: number, originLat: number, destLon: number, destLat: number): number {
+  const totalDistM = haversineM(originLon, originLat, destLon, destLat);
   if (totalDistM < 1) return 0;
-
   const STEPS = 10;
   let totalMin = 0;
   const segDistM = totalDistM / STEPS;
-
   for (let i = 0; i < STEPS; i++) {
-    const t = (i + 0.5) / STEPS; // midpoint of this segment
-    const lon = homeLon + t * (workLon - homeLon);
-    const lat = homeLat + t * (workLat - homeLat);
+    const t = (i + 0.5) / STEPS;
+    const lon = originLon + t * (destLon - originLon);
+    const lat = originLat + t * (destLat - originLat);
     const distFromCore = haversineM(lon, lat, DOWNTOWN_LON, DOWNTOWN_LAT);
     const zone = CAR_SPEED_ZONES.find((z) => distFromCore <= z.maxDistM)!;
     totalMin += (segDistM / 1000 / zone.speedKmh) * 60;
   }
-
   return +totalMin.toFixed(2);
 }
 
@@ -267,8 +377,6 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
   const stopMap = new Map<number, GraphStop>();
   const graph: Graph = new Map();
   let nextId = 1;
-
-  // Deduplicate by name — same stop may appear on multiple routes
   const nameToId = new Map<string, number>();
 
   function getOrAddStop(name: string, lon: number, lat: number, routeId: string, routeType: Route["type"]): number {
@@ -293,7 +401,6 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
     });
   }
 
-  // Add all existing routes — subway, LRT, streetcar, bus only (no GO Train)
   const allRoutes: Route[] = [
     ...ROUTES.filter((r) => r.type === "subway" || r.type === "lrt"),
     ...ROUTES.filter((r) => r.type === "streetcar"),
@@ -317,9 +424,7 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
     }
   }
 
-  // Walking transfer edges between stops on different routes within WALK_TRANSFER_M
   const stopList = Array.from(stopMap.values());
-  // Tile index
   const tile = new Map<string, GraphStop[]>();
   for (const s of stopList) {
     const key = `${Math.floor(s.lon * 100)},${Math.floor(s.lat * 100)}`;
@@ -352,21 +457,18 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
     }
   }
 
-  // Add proposed lines
   let virtualId = -1;
   for (const line of extra) {
     const speed   = (SPEED as Record<string, number>)[line.type] ?? 22;
     const penalty = (BOARD_PENALTY as Record<string, number>)[line.type] ?? 4;
-    const lineStops = line.stops;
     let prevId: number | null = null;
 
-    for (const stop of lineStops) {
+    for (const stop of line.stops) {
       const [lon, lat] = stop.coords;
       const id = virtualId--;
       stopMap.set(id, { id, name: stop.name, lon, lat, routeId: `proposed-${line.name}`, routeType: (line.type as Route["type"]) ?? "bus" });
       graph.set(id, []);
 
-      // Walking transfer to nearby existing stops
       for (const rs of stopList) {
         const d = haversineM(lon, lat, rs.lon, rs.lat);
         if (d <= WALK_TRANSFER_M) {
@@ -392,26 +494,21 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
 
 // ── Dijkstra ──────────────────────────────────────────────────────────────────
 
-type HeapItem = [number, number]; // [cost, nodeId]
+type HeapItem = [number, number];
 
 function dijkstra(graph: Graph, src: number, dst: number): { dist: number; path: number[] } | null {
   const dist = new Map<number, number>();
   const prev = new Map<number, number>();
-  // Simple min-heap (array sorted on insertion for small graphs)
   const heap: HeapItem[] = [[0, src]];
   dist.set(src, 0);
 
   while (heap.length > 0) {
-    // Pop minimum
     heap.sort((a, b) => a[0] - b[0]);
     const [cost, u] = heap.shift()!;
     if (u === dst) {
       const path: number[] = [];
       let cur: number | undefined = dst;
-      while (cur !== undefined) {
-        path.unshift(cur);
-        cur = prev.get(cur);
-      }
+      while (cur !== undefined) { path.unshift(cur); cur = prev.get(cur); }
       return { dist: cost, path };
     }
     if (cost > (dist.get(u) ?? Infinity)) continue;
@@ -427,27 +524,20 @@ function dijkstra(graph: Graph, src: number, dst: number): { dist: number; path:
   return null;
 }
 
-// ── Nearest stop index ────────────────────────────────────────────────────────
+// ── Nearest stop ──────────────────────────────────────────────────────────────
 
-function findNearestStop(
-  lon: number, lat: number, maxM: number,
-  stops: Map<number, GraphStop>
-): { id: number; distM: number } | null {
+function findNearestStop(lon: number, lat: number, maxM: number, stops: Map<number, GraphStop>): { id: number; distM: number } | null {
   let best: { id: number; distM: number } | null = null;
   for (const s of stops.values()) {
-    // Only connect to real stops (not virtual proposed stops) for access
     if (s.id < 0) continue;
     const d = haversineM(lon, lat, s.lon, s.lat);
-    if (d <= maxM && (!best || d < best.distM)) {
-      best = { id: s.id, distM: d };
-    }
+    if (d <= maxM && (!best || d < best.distM)) best = { id: s.id, distM: d };
   }
   return best;
 }
 
-// ── Agent generation ──────────────────────────────────────────────────────────
+// ── PRNG helpers ──────────────────────────────────────────────────────────────
 
-// Seeded PRNG (simple LCG so results are reproducible)
 function makePrng(seed: number) {
   let s = seed;
   return () => {
@@ -459,16 +549,101 @@ function makePrng(seed: number) {
 function weightedChoice<T extends { weight: number }>(items: T[], rand: () => number): T {
   const total = items.reduce((s, i) => s + i.weight, 0);
   let r = rand() * total;
-  for (const item of items) {
-    r -= item.weight;
-    if (r <= 0) return item;
-  }
+  for (const item of items) { r -= item.weight; if (r <= 0) return item; }
   return items[items.length - 1]!;
 }
 
+// ── Destination picking ───────────────────────────────────────────────────────
+
+function pickDestination(
+  poolName: string, anchorLon: number, anchorLat: number,
+  socialPull: number, rand: () => number,
+): { lon: number; lat: number; name: string } {
+  if (poolName === "nearby") {
+    return { lon: anchorLon + (rand() - 0.5) * 0.008, lat: anchorLat + (rand() - 0.5) * 0.008, name: "Nearby" };
+  }
+  const pool = DEST_POOLS[poolName];
+  if (!pool?.length) {
+    return { lon: anchorLon + (rand() - 0.5) * 0.008, lat: anchorLat + (rand() - 0.5) * 0.008, name: "Nearby" };
+  }
+  // Higher socialPull → weaker distance decay → more willing to travel far
+  const weights = pool.map((p) => {
+    const distKm = Math.max(0.5, haversineM(anchorLon, anchorLat, p.lon, p.lat) / 1000);
+    const exponent = 2 * (1 - socialPull); // 0=uniform, 2=strong nearby bias
+    return 1 / Math.pow(distKm, exponent);
+  });
+  const total = weights.reduce((s, w) => s + w, 0);
+  let r = rand() * total;
+  for (let i = 0; i < pool.length; i++) { r -= weights[i]!; if (r <= 0) return pool[i]!; }
+  return pool[pool.length - 1]!;
+}
+
+// ── Trip chain builder ────────────────────────────────────────────────────────
+
+function buildLegChain(
+  persona: Persona,
+  homeLon: number, homeLat: number,
+  workLon: number, workLat: number,
+  profile: DayProfile,
+  rand: () => number,
+): AgentLeg[] {
+  const legs: AgentLeg[] = [];
+  const isEarlyShift = persona === "shift_worker" && rand() < 0.5;
+
+  // Morning commute
+  const morningMean =
+    persona === "senior"       ? 570  // 9:30am
+    : isEarlyShift             ? 330  // 5:30am
+    : persona === "shift_worker" ? 810 // 1:30pm
+    : persona === "parent"     ? 450  // 7:30am
+    : persona === "student"    ? 510  // 8:30am
+    :                            480; // 8:00am (worker default)
+
+  legs.push({
+    purpose: "commute",
+    departureMin: clampNormal(rand, morningMean, 25, 240, 900),
+    originLon: homeLon, originLat: homeLat,
+    destLon: workLon,   destLat: workLat,
+  });
+
+  // Optional activity legs
+  for (const entry of Object.values(profile[persona] ?? {})) {
+    if (rand() > entry.probability) continue;
+    const depMin = clampNormal(rand, entry.departure.mean, entry.departure.sd, 240, 1380);
+    const [oLon, oLat] = entry.anchor === "home" ? [homeLon, homeLat] : [workLon, workLat];
+    const dest = pickDestination(entry.destPool, oLon, oLat, entry.socialPull, rand);
+    const dur  = clampNormal(rand, entry.durationMin.mean, entry.durationMin.sd, 15, 300);
+
+    legs.push({ purpose: entry.purpose, departureMin: depMin, originLon: oLon, originLat: oLat, destLon: dest.lon, destLat: dest.lat });
+    legs.push({ purpose: "return", departureMin: depMin + dur, originLon: dest.lon, originLat: dest.lat, destLon: oLon, destLat: oLat });
+  }
+
+  // Evening commute
+  const eveningMean =
+    persona === "senior"       ? 750   // 12:30pm
+    : isEarlyShift             ? 810   // 1:30pm
+    : persona === "shift_worker" ? 1350 // 10:30pm
+    : persona === "student"    ? 960   // 4:00pm
+    : persona === "parent"     ? 960   // 4:00pm
+    :                            1020; // 5:00pm (worker default)
+
+  legs.push({
+    purpose: "commute",
+    departureMin: clampNormal(rand, eveningMean, 30, 600, 1440),
+    originLon: workLon, originLat: workLat,
+    destLon: homeLon,   destLat: homeLat,
+  });
+
+  return legs.sort((a, b) => a.departureMin - b.departureMin);
+}
+
+function generateDayProfile(_seed: number): DayProfile {
+  return DEFAULT_DAY_PROFILE;
+}
+
+// ── Population loading ────────────────────────────────────────────────────────
+
 async function loadPopulationPoints(): Promise<{ lon: number; lat: number; weight: number }[]> {
-  // Fetch the most populated cells first so the limit captures dense areas across
-  // the whole city rather than whatever happened to be inserted first.
   const { data, error } = await supabase
     .from("pop_data")
     .select("longitude, latitude, population")
@@ -479,29 +654,28 @@ async function loadPopulationPoints(): Promise<{ lon: number; lat: number; weigh
     .limit(5000);
 
   if (error || !data?.length) {
-    // Fallback: hardcoded Toronto neighbourhood centroids with relative weights
     return [
-      { lon: -79.382, lat: 43.649, weight: 10 }, // Downtown
-      { lon: -79.420, lat: 43.668, weight:  8 }, // Annex
-      { lon: -79.450, lat: 43.655, weight:  7 }, // Roncesvalles
-      { lon: -79.350, lat: 43.690, weight:  9 }, // East York
-      { lon: -79.310, lat: 43.710, weight:  8 }, // Scarborough W
-      { lon: -79.260, lat: 43.770, weight:  6 }, // Scarborough E
-      { lon: -79.540, lat: 43.645, weight:  5 }, // Etobicoke
-      { lon: -79.410, lat: 43.760, weight:  7 }, // North York
-      { lon: -79.480, lat: 43.700, weight:  5 }, // Weston
-      { lon: -79.390, lat: 43.720, weight:  6 }, // Lawrence Park
+      { lon: -79.382, lat: 43.649, weight: 10 },
+      { lon: -79.420, lat: 43.668, weight:  8 },
+      { lon: -79.450, lat: 43.655, weight:  7 },
+      { lon: -79.350, lat: 43.690, weight:  9 },
+      { lon: -79.310, lat: 43.710, weight:  8 },
+      { lon: -79.260, lat: 43.770, weight:  6 },
+      { lon: -79.540, lat: 43.645, weight:  5 },
+      { lon: -79.410, lat: 43.760, weight:  7 },
+      { lon: -79.480, lat: 43.700, weight:  5 },
+      { lon: -79.390, lat: 43.720, weight:  6 },
     ];
   }
 
   return (data as { longitude: number; latitude: number; population: number }[]).map((r) => ({
-    lon: r.longitude,
-    lat: r.latitude,
-    weight: r.population,
+    lon: r.longitude, lat: r.latitude, weight: r.population,
   }));
 }
 
-export async function generateAgents(n: number, seed: number, timeWindow: TimeWindow): Promise<SimAgent[]> {
+// ── Agent generation ──────────────────────────────────────────────────────────
+
+export async function generateAgents(n: number, seed: number, dayProfile: DayProfile): Promise<SimAgent[]> {
   const rand = makePrng(seed);
   const popPoints = await loadPopulationPoints();
 
@@ -516,134 +690,129 @@ export async function generateAgents(n: number, seed: number, timeWindow: TimeWi
     return          { income: "high", transitDep: 0.1  + rand() * 0.15 };
   }
 
-  // Departure time sampler per window.
-  // Morning: workers must *arrive* 8:30–9:30am → depart 30–90 min before → ~7:00–9:00am
-  //          modelled as normal(mean=480, sd=25) = N(8:00am, 25 min)
-  // Evening: workers leave 4:00–6:30pm, concentrated around 5pm
-  //          modelled as normal(mean=1020, sd=30) = N(5:00pm, 30 min) then clamp to [960,1110]
-  function sampleDeparture(direction: "to_work" | "to_home"): number {
-    if (direction === "to_work") {
-      // Target arrival 8:30–9:30 → departure ~60 min earlier on average
-      return Math.round(Math.max(390, Math.min(570, sampleNormal(rand, 480, 25))));
+  function personaFor(distFromCoreM: number): Persona {
+    const r = rand();
+    if (distFromCoreM < 5000) {
+      if (r < 0.45) return "worker";
+      if (r < 0.65) return "student";
+      if (r < 0.80) return "senior";
+      if (r < 0.90) return "parent";
+      return "shift_worker";
+    } else if (distFromCoreM < 15000) {
+      if (r < 0.50) return "worker";
+      if (r < 0.62) return "student";
+      if (r < 0.73) return "senior";
+      if (r < 0.88) return "parent";
+      return "shift_worker";
     } else {
-      return Math.round(Math.max(960, Math.min(1110, sampleNormal(rand, 1020, 30))));
+      if (r < 0.45) return "worker";
+      if (r < 0.52) return "student";
+      if (r < 0.62) return "senior";
+      if (r < 0.82) return "parent";
+      return "shift_worker";
     }
   }
 
-  // Split the agent pool by window
-  const morningN = timeWindow === "morning"  ? n
-                 : timeWindow === "evening"  ? 0
-                 : Math.round(n * 0.55); // full_day: ~55% morning commuters
-  const eveningN = timeWindow === "evening"  ? n
-                 : timeWindow === "morning"  ? 0
-                 : n - morningN;
-
   const agents: SimAgent[] = [];
-  const total = morningN + eveningN;
-
-  for (let i = 0; i < total; i++) {
-    const direction: "to_work" | "to_home" = i < morningN ? "to_work" : "to_home";
-    const departureMin = sampleDeparture(direction);
-
+  for (let i = 0; i < n; i++) {
     const pt = weightedChoice(popPoints, rand);
     const distFromCore = haversineM(pt.lon, pt.lat, DOWNTOWN_LON, DOWNTOWN_LAT);
     const jitterDeg = 0.0015 + (distFromCore / 30_000) * 0.004;
     const homeLon = pt.lon + (rand() - 0.5) * jitterDeg;
     const homeLat = pt.lat + (rand() - 0.5) * jitterDeg;
     const { income, transitDep } = incomeFor(homeLon, homeLat);
+    const persona = personaFor(distFromCore);
 
-    const cluster = weightedChoice(WORK_CLUSTERS, rand);
     let workLon: number, workLat: number, workCluster: string;
-    if (!cluster.lon) {
-      workLon = homeLon + (rand() - 0.5) * 0.01;
-      workLat = homeLat + (rand() - 0.5) * 0.01;
-      workCluster = "Local";
+    if (persona === "student") {
+      const school = SCHOOL_CLUSTERS[Math.floor(rand() * SCHOOL_CLUSTERS.length)]!;
+      workLon = school.lon + (rand() - 0.5) * 0.003;
+      workLat = school.lat + (rand() - 0.5) * 0.003;
+      workCluster = school.name;
     } else {
-      workLon = cluster.lon + (rand() - 0.5) * 0.002;
-      workLat = cluster.lat + (rand() - 0.5) * 0.002;
-      workCluster = cluster.name;
+      const cluster = weightedChoice(WORK_CLUSTERS, rand);
+      if (!cluster.lon) {
+        workLon = homeLon + (rand() - 0.5) * 0.01;
+        workLat = homeLat + (rand() - 0.5) * 0.01;
+        workCluster = "Local";
+      } else {
+        workLon = cluster.lon + (rand() - 0.5) * 0.002;
+        workLat = cluster.lat + (rand() - 0.5) * 0.002;
+        workCluster = cluster.name;
+      }
     }
 
-    agents.push({ id: i, homeLon, homeLat, workLon, workLat, income, transitDep, workCluster, departureMin, direction });
+    const legs = buildLegChain(persona, homeLon, homeLat, workLon, workLat, dayProfile, rand);
+    agents.push({ id: i, homeLon, homeLat, workLon, workLat, income, transitDep, workCluster, persona, legs });
   }
   return agents;
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 
-function routeAgent(agent: SimAgent, graph: Graph, stops: Map<number, GraphStop>): TripResult {
-  const congestion = congestionMultiplierAt(agent.departureMin);
-  // For "to_home" trips swap origin/destination
-  const [originLon, originLat, destLon, destLat] =
-    agent.direction === "to_work"
-      ? [agent.homeLon, agent.homeLat, agent.workLon, agent.workLat]
-      : [agent.workLon, agent.workLat, agent.homeLon, agent.homeLat];
-
-  // Car time scaled by congestion at departure time
-  const baseCarMin = carTravelMin(originLon, originLat, destLon, destLat);
+function routeLeg(
+  agentId: number, legIndex: number, leg: AgentLeg,
+  persona: Persona, income: "low" | "mid" | "high", transitDep: number,
+  homeLon: number, homeLat: number,
+  graph: Graph, stops: Map<number, GraphStop>,
+): LegRouteResult {
+  const congestion = congestionMultiplierAt(leg.departureMin);
+  const baseCarMin = carTravelMin(leg.originLon, leg.originLat, leg.destLon, leg.destLat);
   const carMin = +(baseCarMin / congestion).toFixed(2);
 
-  const access = findNearestStop(originLon, originLat, ACCESS_WALK_M, stops);
-  const egress = findNearestStop(destLon, destLat, ACCESS_WALK_M, stops);
+  const access = findNearestStop(leg.originLon, leg.originLat, ACCESS_WALK_M, stops);
+  const egress = findNearestStop(leg.destLon,   leg.destLat,   ACCESS_WALK_M, stops);
+
+  const base = { agentId, legIndex, purpose: leg.purpose, departureMin: leg.departureMin, carMin, homeLon, homeLat, income, transitDep, persona };
 
   if (!access || !egress) {
-    return { agentId: agent.id, feasible: false, totalMin: carMin, transitMin: 0, accessWalkMin: 0, egressWalkMin: 0, transfers: 0, pathIds: [], carMin, edgesUsed: [] };
+    return { ...base, feasible: false, totalMin: carMin, transitMin: 0, transfers: 0, pathIds: [], edgesUsed: [] };
   }
 
   const accessWalk = walkMin(access.distM);
   const egressWalk = walkMin(egress.distM);
 
   if (access.id === egress.id) {
-    return { agentId: agent.id, feasible: true, totalMin: accessWalk + egressWalk, transitMin: 0, accessWalkMin: accessWalk, egressWalkMin: egressWalk, transfers: 0, pathIds: [access.id], carMin, edgesUsed: [] };
+    return { ...base, feasible: true, totalMin: +(accessWalk + egressWalk).toFixed(2), transitMin: 0, transfers: 0, pathIds: [access.id], edgesUsed: [] };
   }
 
   const result = dijkstra(graph, access.id, egress.id);
   if (!result) {
-    return { agentId: agent.id, feasible: false, totalMin: carMin, transitMin: 0, accessWalkMin: accessWalk, egressWalkMin: egressWalk, transfers: 0, pathIds: [], carMin, edgesUsed: [] };
+    return { ...base, feasible: false, totalMin: carMin, transitMin: 0, transfers: 0, pathIds: [], edgesUsed: [] };
   }
 
-  // Count transfers and collect edges
   let transfers = 0;
   let prevRoute: string | null = null;
-  const edgesUsed: TripResult["edgesUsed"] = [];
+  const edgesUsed: EdgeRecord[] = [];
   for (let i = 0; i < result.path.length - 1; i++) {
     const u = result.path[i]!;
     const v = result.path[i + 1]!;
     const edge = graph.get(u)?.find((e) => e.to === v);
     if (!edge) continue;
     edgesUsed.push({ fromName: edge.fromName, toName: edge.toName, fromLon: edge.fromLon, fromLat: edge.fromLat, toLon: edge.toLon, toLat: edge.toLat, kind: edge.kind, routeName: edge.routeName });
-    if (edge.kind === "walk") {
-      transfers++;
-      prevRoute = null;
-    } else if (prevRoute && edge.routeName !== prevRoute) {
-      transfers++;
-      prevRoute = edge.routeName;
-    } else {
-      prevRoute = edge.routeName;
-    }
+    if (edge.kind === "walk") { transfers++; prevRoute = null; }
+    else if (prevRoute && edge.routeName !== prevRoute) { transfers++; prevRoute = edge.routeName; }
+    else { prevRoute = edge.routeName; }
   }
 
   return {
-    agentId: agent.id,
+    ...base,
     feasible: true,
-    totalMin: +(accessWalk + result.dist + egressWalk).toFixed(2),
+    totalMin:   +(accessWalk + result.dist + egressWalk).toFixed(2),
     transitMin: +result.dist.toFixed(2),
-    accessWalkMin: +accessWalk.toFixed(2),
-    egressWalkMin: +egressWalk.toFixed(2),
     transfers,
     pathIds: result.path,
-    carMin: +carMin.toFixed(2),
     edgesUsed,
   };
 }
 
-function routeAll(agents: SimAgent[], graph: Graph, stops: Map<number, GraphStop>): TripResult[] {
-  // Route in departure-time order so earlier agents route first
-  const sorted = [...agents].sort((a, b) => a.departureMin - b.departureMin);
-  const results = sorted.map((a) => routeAgent(a, graph, stops));
-  // Re-sort back to original agent id order for consistent indexing
-  results.sort((a, b) => a.agentId - b.agentId);
-  return results;
+function routeAllLegs(agents: SimAgent[], graph: Graph, stops: Map<number, GraphStop>): LegRouteResult[] {
+  const tasks: { agent: SimAgent; legIndex: number; leg: AgentLeg }[] = [];
+  for (const a of agents) a.legs.forEach((leg, i) => tasks.push({ agent: a, legIndex: i, leg }));
+  tasks.sort((a, b) => a.leg.departureMin - b.leg.departureMin);
+  return tasks.map(({ agent: a, legIndex, leg }) =>
+    routeLeg(a.id, legIndex, leg, a.persona, a.income, a.transitDep, a.homeLon, a.homeLat, graph, stops)
+  );
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -664,39 +833,41 @@ function percentile(xs: number[], p: number): number {
   return s[lo]! + (idx - lo) * (s[hi]! - s[lo]!);
 }
 
-function snapshotStats(agents: SimAgent[], results: TripResult[]): RunStats {
-  const feasible = results.filter((r) => r.feasible);
+function snapshotStats(legResults: LegRouteResult[]): RunStats {
+  const commute  = legResults.filter((r) => r.purpose === "commute");
+  const feasible = commute.filter((r) => r.feasible);
+  const agentIds      = new Set(commute.map((r) => r.agentId));
+  const accessibleIds = new Set(feasible.map((r) => r.agentId));
   const byIncome: Record<string, number[]> = {};
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
-  for (const r of feasible) {
-    const a = agentMap.get(r.agentId);
-    if (a) (byIncome[a.income] ??= []).push(r.totalMin);
-  }
+  for (const r of feasible) (byIncome[r.income] ??= []).push(r.totalMin);
   return {
-    pctAccessible: +(feasible.length / Math.max(results.length, 1) * 100).toFixed(1),
-    avgTransitMin: +mean(feasible.map((r) => r.transitMin)).toFixed(2),
+    pctAccessible:    +(accessibleIds.size / Math.max(agentIds.size, 1) * 100).toFixed(1),
+    avgTransitMin:    +mean(feasible.map((r) => r.transitMin)).toFixed(2),
     medianTransitMin: +median(feasible.map((r) => r.transitMin)).toFixed(2),
-    p90TransitMin: +percentile(feasible.map((r) => r.transitMin), 90).toFixed(2),
-    avgTotalMin: +mean(feasible.map((r) => r.totalMin)).toFixed(2),
-    avgTransfers: +mean(feasible.map((r) => r.transfers)).toFixed(2),
-    avgCarMin: +mean(results.map((r) => r.carMin)).toFixed(2),
-    incomeBreakdown: Object.fromEntries(Object.entries(byIncome).map(([k, v]) => [k, +mean(v).toFixed(2)])),
+    p90TransitMin:    +percentile(feasible.map((r) => r.transitMin), 90).toFixed(2),
+    avgTotalMin:      +mean(feasible.map((r) => r.totalMin)).toFixed(2),
+    avgTransfers:     +mean(feasible.map((r) => r.transfers)).toFixed(2),
+    avgCarMin:        +mean(commute.map((r) => r.carMin)).toFixed(2),
+    incomeBreakdown:  Object.fromEntries(Object.entries(byIncome).map(([k, v]) => [k, +mean(v).toFixed(2)])),
   };
 }
 
-function equityScore(agents: SimAgent[], results: TripResult[]): number {
-  // Equity = weighted accessibility rate.
-  // Each agent contributes (income weight × transit dependency) to the numerator
-  // if they have a feasible transit path, or 0 if not.
-  // Low-income agents count 1.5×: transit access matters more when you can't afford a car.
+function equityScore(agents: SimAgent[], legResults: LegRouteResult[]): number {
   const IW: Record<string, number> = { low: 1.5, mid: 1.0, high: 0.5 };
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
-  let weightedAccessible = 0;
-  let weightedTotal = 0;
-  for (const r of results) {
-    const a = agentMap.get(r.agentId);
-    if (!a) continue;
-    const w = (IW[a.income] ?? 1) * a.transitDep;
+  const agentCommute = new Map<number, LegRouteResult>();
+  for (const r of legResults) {
+    if (r.purpose !== "commute" || agentCommute.has(r.agentId)) continue;
+    agentCommute.set(r.agentId, r);
+  }
+  // Agents with no routed commute leg count as inaccessible
+  for (const a of agents) {
+    if (!agentCommute.has(a.id)) {
+      agentCommute.set(a.id, { agentId: a.id, legIndex: 0, purpose: "commute", departureMin: 480, feasible: false, totalMin: 0, transitMin: 0, carMin: 0, transfers: 0, pathIds: [], edgesUsed: [], homeLon: a.homeLon, homeLat: a.homeLat, income: a.income, transitDep: a.transitDep, persona: a.persona });
+    }
+  }
+  let weightedAccessible = 0, weightedTotal = 0;
+  for (const [, r] of agentCommute) {
+    const w = (IW[r.income] ?? 1) * r.transitDep;
     weightedTotal += w;
     if (r.feasible) weightedAccessible += w;
   }
@@ -704,19 +875,14 @@ function equityScore(agents: SimAgent[], results: TripResult[]): number {
   return +(weightedAccessible / weightedTotal * 100).toFixed(1);
 }
 
-function computeProposedStress(_baseline: TripResult[], scenario: TripResult[], proposed: ProposedLine[]): StressSegment[] {
+function computeProposedStress(_baseline: LegRouteResult[], scenario: LegRouteResult[], proposed: ProposedLine[]): StressSegment[] {
   if (!proposed.length) return [];
   const counter = new Map<string, { seg: StressSegment; count: number }>();
   for (const r of scenario) {
     for (const e of r.edgesUsed) {
       if (e.kind !== "proposed") continue;
       const key = `${e.fromName}|${e.toName}`;
-      if (!counter.has(key)) {
-        counter.set(key, {
-          seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 },
-          count: 0,
-        });
-      }
+      if (!counter.has(key)) counter.set(key, { seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 }, count: 0 });
       counter.get(key)!.count++;
     }
   }
@@ -725,18 +891,13 @@ function computeProposedStress(_baseline: TripResult[], scenario: TripResult[], 
   return records.map(({ seg, count }) => ({ ...seg, agentTrips: count, stressPct: +(count / maxTrips * 100).toFixed(1) }));
 }
 
-function computeBaselineStress(results: TripResult[], topN = 80): StressSegment[] {
+function computeBaselineStress(results: LegRouteResult[], topN = 80): StressSegment[] {
   const counter = new Map<string, { seg: StressSegment; count: number }>();
   for (const r of results) {
     for (const e of r.edgesUsed) {
       if (e.kind !== "transit") continue;
       const key = `${e.fromName}|${e.toName}`;
-      if (!counter.has(key)) {
-        counter.set(key, {
-          seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 },
-          count: 0,
-        });
-      }
+      if (!counter.has(key)) counter.set(key, { seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 }, count: 0 });
       counter.get(key)!.count++;
     }
   }
@@ -751,7 +912,7 @@ export async function runSimulation(opts: {
   proposed: ProposedLine[];
   agentCount: number;
   seed: number;
-  timeWindow: TimeWindow;
+  timeRange: { startMin: number; endMin: number };
 }): Promise<SimulationResult> {
   const t0 = Date.now();
   const hasProposed = opts.proposed.length > 0;
@@ -759,45 +920,50 @@ export async function runSimulation(opts: {
   const { graph: baseGraph, stops: baseStops } = buildGraph([]);
   const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed) : { graph: baseGraph, stops: baseStops };
 
-  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 2000)), opts.seed, opts.timeWindow);
+  const dayProfile = generateDayProfile(opts.seed);
+  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 2000)), opts.seed, dayProfile);
 
-  const baseResults = routeAll(agents, baseGraph, baseStops);
-  const scenResults = hasProposed ? routeAll(agents, scenGraph, scenStops) : baseResults;
+  const baseResults = routeAllLegs(agents, baseGraph, baseStops);
+  const scenResults = hasProposed ? routeAllLegs(agents, scenGraph, scenStops) : baseResults;
 
-  const baseStats  = snapshotStats(agents, baseResults);
-  const scenStats  = snapshotStats(agents, scenResults);
+  const baseStats  = snapshotStats(baseResults);
+  const scenStats  = snapshotStats(scenResults);
   const baseEquity = equityScore(agents, baseResults);
   const scenEquity = equityScore(agents, scenResults);
 
-  // Index results by agentId for O(1) lookup
-  const baseMap = new Map(baseResults.map((r) => [r.agentId, r]));
-  const scenMap = new Map(scenResults.map((r) => [r.agentId, r]));
+  // Build per-leg output filtered to timeRange
+  const { startMin, endMin } = opts.timeRange;
+  const baseMap = new Map<string, LegRouteResult>();
+  const scenMap = new Map<string, LegRouteResult>();
+  for (const r of baseResults) baseMap.set(`${r.agentId}-${r.legIndex}`, r);
+  for (const r of scenResults) scenMap.set(`${r.agentId}-${r.legIndex}`, r);
 
-  const perAgent: PerAgentDelta[] = agents.map((a) => {
-    const b = baseMap.get(a.id)!;
-    const s = scenMap.get(a.id)!;
-
-    // Build path coords from the active trip's edges (scenario when proposed, else baseline)
-    const activeTrip = hasProposed ? s : b;
-    let pathCoords: [number, number][] = [];
-    if (activeTrip.feasible && activeTrip.edgesUsed.length > 0) {
-      pathCoords = [[activeTrip.edgesUsed[0]!.fromLon, activeTrip.edgesUsed[0]!.fromLat]];
-      for (const e of activeTrip.edgesUsed) {
-        pathCoords.push([e.toLon, e.toLat]);
+  const perAgent: PerAgentDelta[] = [];
+  for (const a of agents) {
+    a.legs.forEach((leg, legIndex) => {
+      if (leg.departureMin < startMin || leg.departureMin >= endMin) return;
+      const key = `${a.id}-${legIndex}`;
+      const b = baseMap.get(key)!;
+      const s = scenMap.get(key) ?? b;
+      const activeTrip = hasProposed ? s : b;
+      let pathCoords: [number, number][] = [];
+      if (activeTrip.feasible && activeTrip.edgesUsed.length > 0) {
+        pathCoords = [[activeTrip.edgesUsed[0]!.fromLon, activeTrip.edgesUsed[0]!.fromLat]];
+        for (const e of activeTrip.edgesUsed) pathCoords.push([e.toLon, e.toLat]);
       }
-    }
-
-    return {
-      homeLon: a.homeLon, homeLat: a.homeLat,
-      income: a.income, transitDep: a.transitDep,
-      baselineTime: b.totalMin, scenarioTime: s.totalMin,
-      timeSavedMin: +(b.totalMin - s.totalMin).toFixed(2),
-      newlyAccessible: !b.feasible && s.feasible,
-      departureMin: a.departureMin,
-      direction: a.direction,
-      pathCoords,
-    };
-  });
+      perAgent.push({
+        agentId: a.id,
+        homeLon: a.homeLon, homeLat: a.homeLat,
+        income: a.income, transitDep: a.transitDep,
+        persona: a.persona, purpose: leg.purpose,
+        departureMin: leg.departureMin,
+        baselineTime: b.totalMin, scenarioTime: s.totalMin,
+        timeSavedMin: +(b.totalMin - s.totalMin).toFixed(2),
+        newlyAccessible: !b.feasible && s.feasible,
+        pathCoords,
+      });
+    });
+  }
 
   const newlyAccessible = perAgent.filter((p) => p.newlyAccessible).length;
 
@@ -805,20 +971,20 @@ export async function runSimulation(opts: {
     hasProposedLines: hasProposed,
     agentCount: agents.length,
     runDurationS: +((Date.now() - t0) / 1000).toFixed(2),
-    timeWindow: opts.timeWindow,
+    timeRange: { startMin, endMin },
     baseline: baseStats,
     scenario: scenStats,
     delta: {
-      timeSavedMin:         +(baseStats.avgTransitMin - scenStats.avgTransitMin).toFixed(2),
-      totalTimeSavedMin:    +(baseStats.avgTotalMin   - scenStats.avgTotalMin).toFixed(2),
-      accessibilityGainPct: +(scenStats.pctAccessible - baseStats.pctAccessible).toFixed(1),
-      transferReduction:    +(baseStats.avgTransfers  - scenStats.avgTransfers).toFixed(2),
-      equityImprovement:    +(scenEquity - baseEquity).toFixed(1),
+      timeSavedMin:          +(baseStats.avgTransitMin - scenStats.avgTransitMin).toFixed(2),
+      totalTimeSavedMin:     +(baseStats.avgTotalMin   - scenStats.avgTotalMin).toFixed(2),
+      accessibilityGainPct:  +(scenStats.pctAccessible - baseStats.pctAccessible).toFixed(1),
+      transferReduction:     +(baseStats.avgTransfers  - scenStats.avgTransfers).toFixed(2),
+      equityImprovement:     +(scenEquity - baseEquity).toFixed(1),
       newlyAccessibleAgents: newlyAccessible,
     },
     equity: { baselineScore: baseEquity, scenarioScore: scenEquity },
-    lineStress:        computeProposedStress(baseResults, scenResults, opts.proposed),
-    baselineEdgeStress: computeBaselineStress(baseResults),
+    lineStress:          computeProposedStress(baseResults, scenResults, opts.proposed),
+    baselineEdgeStress:  computeBaselineStress(baseResults),
     perAgent,
     graphStats: { nodes: baseStops.size, edges: [...baseGraph.values()].reduce((n, es) => n + es.length, 0) },
   };

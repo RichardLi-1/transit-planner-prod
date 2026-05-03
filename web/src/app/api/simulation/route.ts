@@ -1,7 +1,7 @@
 import "server-only";
 import { type NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { runSimulation, type SimulationResult, type StressSegment, type TimeWindow } from "~/server/simulation";
+import { runSimulation, type SimulationResult, type StressSegment } from "~/server/simulation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -42,7 +42,7 @@ Paragraph 1: Overall effectiveness summary. Paragraph 2: Equity and access impli
   }
 }
 
-// ── Field name conversion (camelCase → snake_case for panel) ──────────────────
+// ── Field name conversion ──────────────────────────────────────────────────────
 
 function convertStressSegment(seg: StressSegment) {
   return {
@@ -62,7 +62,7 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
     agent_count: r.agentCount,
     run_duration_s: r.runDurationS,
     has_proposed_lines: r.hasProposedLines,
-    time_window: r.timeWindow,
+    time_range: { start_min: r.timeRange.startMin, end_min: r.timeRange.endMin },
     baseline: {
       pct_accessible: r.baseline.pctAccessible,
       avg_transit_time_min: r.baseline.avgTransitMin,
@@ -98,16 +98,18 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
     line_stress: r.lineStress.map(convertStressSegment),
     baseline_edge_stress: r.baselineEdgeStress.map(convertStressSegment),
     per_agent: r.perAgent.map((p) => ({
+      agent_id: p.agentId,
       home_lon: p.homeLon,
       home_lat: p.homeLat,
       income: p.income,
       transit_dep: p.transitDep,
+      persona: p.persona,
+      purpose: p.purpose,
       baseline_time: p.baselineTime,
       scenario_time: p.scenarioTime,
       time_saved_min: p.timeSavedMin,
       newly_accessible: p.newlyAccessible,
       departure_min: p.departureMin,
-      direction: p.direction,
       path_coords: p.pathCoords,
     })),
     narrative,
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest) {
     scenario_name?: string;
     seed?: number;
     narrate?: boolean;
-    time_window?: TimeWindow;
+    time_range?: { start_min: number; end_min: number };
   };
 
   try {
@@ -139,11 +141,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const tr = body.time_range ?? { start_min: 360, end_min: 1440 };
     const result = await runSimulation({
       proposed: body.proposed_lines ?? [],
       agentCount: body.agent_count ?? 500,
       seed: body.seed ?? 42,
-      timeWindow: body.time_window ?? "morning",
+      timeRange: { startMin: tr.start_min, endMin: tr.end_min },
     });
 
     const narrative =
@@ -164,7 +167,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const result = await runSimulation({ proposed: [], agentCount: 50, seed: 42, timeWindow: "morning" });
+    const result = await runSimulation({ proposed: [], agentCount: 50, seed: 42, timeRange: { startMin: 360, endMin: 1440 } });
     return NextResponse.json({
       graph_loaded: true,
       stop_count: result.graphStats.nodes,
