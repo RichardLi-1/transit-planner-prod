@@ -215,6 +215,23 @@ function TimeRangeSlider({
 
   return (
     <div className="space-y-2">
+      {/* CSS to allow both thumbs to receive pointer events independently */}
+      <style>{`
+        .time-range-input {
+          pointer-events: none;
+        }
+        .time-range-input::-webkit-slider-thumb {
+          pointer-events: all;
+          cursor: grab;
+        }
+        .time-range-input::-moz-range-thumb {
+          pointer-events: all;
+          cursor: grab;
+        }
+        .time-range-input:active::-webkit-slider-thumb { cursor: grabbing; }
+        .time-range-input:active::-moz-range-thumb { cursor: grabbing; }
+      `}</style>
+
       <div className="flex justify-between text-xs font-medium text-stone-700">
         <span>{fmtMin(startMin)}</span>
         <span>{fmtMin(endMin)}</span>
@@ -237,8 +254,8 @@ function TimeRangeSlider({
             const v = Number(e.target.value);
             if (v < endMin) onStartChange(v);
           }}
-          className="absolute inset-0 w-full appearance-none bg-transparent cursor-pointer"
-          style={{ zIndex: startMin >= endMin - STEP ? 5 : 3 }}
+          className="time-range-input absolute inset-0 w-full appearance-none bg-transparent"
+          style={{ zIndex: 3 }}
         />
         {/* End handle */}
         <input
@@ -249,8 +266,8 @@ function TimeRangeSlider({
             const v = Number(e.target.value);
             if (v > startMin) onEndChange(v);
           }}
-          className="absolute inset-0 w-full appearance-none bg-transparent cursor-pointer"
-          style={{ zIndex: 4 }}
+          className="time-range-input absolute inset-0 w-full appearance-none bg-transparent"
+          style={{ zIndex: 3 }}
         />
       </div>
 
