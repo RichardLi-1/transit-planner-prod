@@ -49,6 +49,11 @@ type Session = {
   statusMessages: string[];
   proposedRoutes: ProposedRoute[];
   finalRoute?: ParsedRoute;
+  /** True when the panel closed or stream stopped before SSE `done`. */
+  incomplete?: boolean;
+  routeScores?: Record<string, RouteScore>;
+  orchestratorInfo?: OrchestratorDirective | null;
+  iterationInfo?: IterationInfo | null;
 };
 
 // ── Agent column order ─────────────────────────────────────────────────────────
@@ -214,11 +219,12 @@ ${agentHTML}
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 
-// Visual bg/border are applied as Tailwind classes on each container so dark mode overrides in globals.css apply
-const PANEL_CLASSES = "bg-white dark:bg-[#1c1c1e] border border-[#BEB7B4] dark:border-stone-700";
+// Match floating map chrome (Population Density toolbar, settings menu): same border token + lighter shadow.
+const PANEL_CLASSES =
+  "bg-white dark:bg-[#1c1c1e] border border-[#D7D7D7] dark:border-stone-600 rounded-xl shadow-sm";
 
 const CARD_STYLE: React.CSSProperties = {
-  border: "1px solid rgba(190,183,180,0.5)",
+  border: "1px solid #d7d7d7",
   boxShadow: "none",
 };
 
@@ -356,9 +362,17 @@ function AgentCard({ state, isActive }: { state: AgentState; isActive: boolean }
 function SessionDetail({ session }: { session: Session }) {
   const topAgents = AGENT_ORDER.filter((a) => session.agentStates[a]);
   const commission = session.agentStates["Planning Commission"];
+  const scores = session.routeScores ?? {};
+  const orchestrator = session.orchestratorInfo ?? null;
+  const iteration = session.iterationInfo ?? null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+      {session.incomplete && (
+        <div className="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          Closed before the council stream finished — messages below are frozen at close time.
+        </div>
+      )}
       {session.statusMessages.length > 0 && (
         <div style={{ padding: "12px 16px 4px" }}>
           {session.statusMessages.slice(0, 2).map((s, i) => (
@@ -376,6 +390,48 @@ function SessionDetail({ session }: { session: Session }) {
       {commission && (
         <div style={{ padding: "0 16px" }}>
           <AgentCard state={commission} isActive={false} />
+        </div>
+      )}
+      {Object.keys(scores).length > 0 && (
+        <div className="px-4 pt-2 pb-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 mb-1.5">Route Scores</p>
+          <div className="flex gap-2 flex-wrap">
+            {Object.entries(scores).map(([agent, score]) => {
+              const agentColor = AGENTS_META[agent] ?? "#64748b";
+              return <RouteScoreCard key={agent} agent={agent} score={score} color={agentColor} />;
+            })}
+          </div>
+        </div>
+      )}
+      {orchestrator && (
+        <div className="px-4 pt-1">
+          <OrchestratorBadge directive={orchestrator} iterationInfo={iteration} />
+        </div>
+      )}
+      {session.proposedRoutes.length > 0 && (
+        <div className="px-4 pt-2 pb-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 mb-1.5">Proposals</p>
+          <div className="flex gap-2 flex-wrap">
+            {session.proposedRoutes.map(({ label, route }) => (
+              <div
+                key={label}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px]"
+                style={{
+                  ...CARD_STYLE,
+                  opacity: session.finalRoute && (route.name !== session.finalRoute.name || route.color !== session.finalRoute.color) ? 0.5 : 1,
+                  outline:
+                    session.finalRoute && route.name === session.finalRoute.name && route.color === session.finalRoute.color
+                      ? "1.5px solid #1c1917"
+                      : "none",
+                }}
+              >
+                <span className="h-1.5 w-3 shrink-0 rounded-full" style={{ background: route.color }} />
+                <span className="font-medium text-stone-700">{route.name}</span>
+                <span className="text-stone-400">·</span>
+                <span className="text-stone-400">{label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {session.finalRoute && (
@@ -452,6 +508,7 @@ export function ChatPanel({
   onRoutePreview,
   onToolCall,
   routePanelOpen,
+  randomizeSpeakingOrder = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -463,6 +520,7 @@ export function ChatPanel({
   onRoutePreview?: (routes: ParsedRoute[] | null) => void;
   onToolCall?: (evt: ToolCallEvent) => void;
   routePanelOpen?: boolean;
+  randomizeSpeakingOrder?: boolean;
 }) {
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [statusMessages, setStatusMessages] = useState<string[]>([]);
@@ -491,6 +549,75 @@ export function ChatPanel({
   const spokenQuotesRef = useRef<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sessionTimestamp = useRef<Date>(new Date());
+  const abortControllerRef = useRef<AbortController | null>(null);
+  /** Stable id for one council run — close-out snapshot + SSE `done` both upsert this row. */
+  const currentSessionIdRef = useRef("");
+  const doneReceivedRef = useRef(false);
+  const streamingRef = useRef(false);
+  const finalRouteRef = useRef<ParsedRoute | null>(null);
+  const routeScoresRef = useRef<Record<string, RouteScore>>({});
+  const orchestratorInfoRef = useRef<OrchestratorDirective | null>(null);
+  const iterationInfoRef = useRef<IterationInfo | null>(null);
+
+  useEffect(() => { streamingRef.current = streaming; }, [streaming]);
+  useEffect(() => { finalRouteRef.current = finalRoute; }, [finalRoute]);
+  useEffect(() => { routeScoresRef.current = routeScores; }, [routeScores]);
+  useEffect(() => { orchestratorInfoRef.current = orchestratorInfo; }, [orchestratorInfo]);
+  useEffect(() => { iterationInfoRef.current = iterationInfo; }, [iterationInfo]);
+
+  function upsertCouncilSession(snapshot: Session) {
+    setSessions((prev) => {
+      const i = prev.findIndex((s) => s.id === snapshot.id);
+      if (i >= 0) {
+        const next = [...prev];
+        next[i] = snapshot;
+        return next;
+      }
+      return [...prev, snapshot];
+    });
+  }
+
+  function buildCouncilSnapshot(extras: { incomplete: boolean }): Session {
+    const commissionRoute = agentStatesRef.current["Planning Commission"]?.route;
+    return {
+      id: currentSessionIdRef.current,
+      timestamp: sessionTimestamp.current,
+      neighbourhoods: neighbourhoodNames,
+      stations: stationNames,
+      agentStates: { ...agentStatesRef.current },
+      statusMessages: [...statusRef.current],
+      proposedRoutes: [...proposedRoutesRef.current],
+      finalRoute: finalRouteRef.current ?? commissionRoute,
+      incomplete: extras.incomplete,
+      routeScores: { ...routeScoresRef.current },
+      orchestratorInfo: orchestratorInfoRef.current,
+      iterationInfo: iterationInfoRef.current,
+    };
+  }
+
+  function councilSnapshotHasContent(): boolean {
+    return (
+      Object.keys(agentStatesRef.current).length > 0 ||
+      proposedRoutesRef.current.length > 0 ||
+      statusRef.current.length > 0 ||
+      finalRouteRef.current != null
+    );
+  }
+
+  /** Persist partial council + stop streaming so closing the panel cannot corrupt refs mid-flight. */
+  function handleClosePanel() {
+    const runId = currentSessionIdRef.current;
+    if (
+      hasStarted.current &&
+      runId &&
+      !doneReceivedRef.current &&
+      (streamingRef.current || councilSnapshotHasContent())
+    ) {
+      upsertCouncilSession(buildCouncilSnapshot({ incomplete: true }));
+    }
+    abortControllerRef.current?.abort();
+    onClose();
+  }
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -558,6 +685,16 @@ export function ChatPanel({
   }, [open, onRoutePreview]);
 
   async function startCouncil() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+    currentSessionIdRef.current = `council-${Date.now()}`;
+    doneReceivedRef.current = false;
+    finalRouteRef.current = null;
+    routeScoresRef.current = {};
+    orchestratorInfoRef.current = null;
+    iterationInfoRef.current = null;
+
     setStreaming(true);
     setAgentStates({});
     setStatusMessages([]);
@@ -582,7 +719,9 @@ export function ChatPanel({
           context: null,
           existing_lines: existingLineStops,
           provider: localStorage.getItem("aiProvider") ?? "anthropic",
+          randomize_speaking_order: randomizeSpeakingOrder,
         }),
+        signal,
       });
 
       if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
@@ -655,17 +794,25 @@ export function ChatPanel({
 
             } else if (evt.type === "score_update") {
               const agentName = evt.agent as string;
-              setRouteScores((prev) => ({ ...prev, [agentName]: evt.score as RouteScore }));
+              setRouteScores((prev) => {
+                const next = { ...prev, [agentName]: evt.score as RouteScore };
+                routeScoresRef.current = next;
+                return next;
+              });
 
             } else if (evt.type === "orchestrator") {
-              setOrchestratorInfo(evt.directive as OrchestratorDirective);
+              const directive = evt.directive as OrchestratorDirective;
+              orchestratorInfoRef.current = directive;
+              setOrchestratorInfo(directive);
 
             } else if (evt.type === "iteration") {
-              setIterationInfo({
+              const iter = {
                 round: evt.round as number,
                 converged: evt.converged as boolean,
                 reason: evt.reason as string,
-              });
+              };
+              iterationInfoRef.current = iter;
+              setIterationInfo(iter);
 
             } else if (evt.type === "tool_call") {
               onToolCall?.(evt as unknown as ToolCallEvent);
@@ -688,6 +835,7 @@ export function ChatPanel({
 
             } else if (evt.type === "route_final") {
               const route = { ...(evt.route as ParsedRoute), prScore: evt.pr_score as number | undefined };
+              finalRouteRef.current = route;
               setFinalRoute(route);
               onRoutePreview?.(null);
               onAddRoute(route);
@@ -695,16 +843,8 @@ export function ChatPanel({
             } else if (evt.type === "done") {
               setStreaming(false);
               onRoutePreview?.(null);
-              setSessions((prev) => [...prev, {
-                id: Date.now().toString(),
-                timestamp: sessionTimestamp.current,
-                neighbourhoods: neighbourhoodNames,
-                stations: stationNames,
-                agentStates: agentStatesRef.current,
-                statusMessages: statusRef.current,
-                proposedRoutes: proposedRoutesRef.current,
-                finalRoute: agentStatesRef.current["Planning Commission"]?.route,
-              }]);
+              doneReceivedRef.current = true;
+              upsertCouncilSession(buildCouncilSnapshot({ incomplete: false }));
             }
           } catch {
             // ignore malformed chunk
@@ -712,6 +852,11 @@ export function ChatPanel({
         }
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setStreaming(false);
+        onRoutePreview?.(null);
+        return;
+      }
       setStatusMessages((prev) => [...prev, "Something went wrong. Please try again."]);
       console.error("Council error:", err);
     } finally {
@@ -726,6 +871,16 @@ export function ChatPanel({
   const commission = agentStates["Planning Commission"];
   const activeAgent = Object.values(agentStates).find((a) => !a.done)?.agent;
   const rightOffset = routePanelOpen ? "376px" : "56px";
+  // Keep council panel inside the viewport on short windows / mobile toolbars (# 📖 Learn: dvh tracks dynamic viewport when browser chrome shows/hides).
+  const panelEdgeReservePx = routePanelOpen ? 422 : 122;
+  const panelLayoutStyle: React.CSSProperties = {
+    bottom: "1.25rem",
+    right: `calc(${rightOffset} + 30px)`,
+    width: `min(${panelSize.width}px, calc(100vw - ${panelEdgeReservePx}px))`,
+    height: `min(${panelSize.height}px, calc(100dvh - 5.5rem))`,
+    maxHeight: "calc(100dvh - 5.5rem)",
+    transition: "right 0.3s ease",
+  };
 
   // ── History list ─────────────────────────────────────────────────────────────
   const resizeHandle = (
@@ -742,17 +897,17 @@ export function ChatPanel({
 
   if (view === "history") {
     return (
-      <div className={`pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl shadow-xl ${PANEL_CLASSES}`}
-        style={{ width: panelSize.width, height: panelSize.height, maxHeight: "calc(100vh - 44px)", bottom: "22px", right: `calc(${rightOffset} + 30px)`, transition: "right 0.3s ease" }}>
+      <div className={`pointer-events-auto absolute flex min-h-0 flex-col overflow-hidden ${PANEL_CLASSES}`}
+        style={panelLayoutStyle}>
         {resizeHandle}
-        <div className="flex items-center gap-2 border-b border-stone-200/40 px-4 py-3">
+        <div className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3">
           <button onClick={() => setView("live")} className="text-stone-400 hover:text-stone-700">
             <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
           </button>
           <p className="text-sm font-semibold text-stone-800">Session History</p>
           <p className="ml-auto text-xs text-stone-400">{sessions.length} session{sessions.length !== 1 ? "s" : ""}</p>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5" style={{ minHeight: 0 }}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
           {sessions.length === 0 && <p className="text-center text-sm text-stone-400 py-8">No past sessions yet</p>}
           {[...sessions].reverse().map((s) => (
             <button key={s.id} onClick={() => setView({ sessionId: s.id })}
@@ -760,7 +915,9 @@ export function ChatPanel({
               style={{ ...CARD_STYLE, display: "block" }}>
               <div className="flex items-center gap-2 mb-0.5">
                 {s.finalRoute && <span className="h-2 w-4 rounded-full shrink-0" style={{ background: s.finalRoute.color }} />}
-                <span className="text-xs font-semibold text-stone-700 truncate">{s.finalRoute?.name ?? "No route generated"}</span>
+                <span className="text-xs font-semibold text-stone-700 truncate">
+                  {s.finalRoute?.name ?? (s.incomplete ? "Deliberation (draft)" : "No route generated")}
+                </span>
                 <span className="ml-auto text-[10px] text-stone-400 shrink-0">{fmtTime(s.timestamp)}</span>
                 {s.finalRoute && (
                   <button
@@ -785,15 +942,17 @@ export function ChatPanel({
     const session = sessions.find((s) => s.id === view.sessionId);
     if (!session) { setView("live"); return null; }
     return (
-      <div className={`pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl shadow-xl ${PANEL_CLASSES}`}
-        style={{ width: panelSize.width, height: panelSize.height, maxHeight: "calc(100vh - 44px)", bottom: "22px", right: `calc(${rightOffset} + 30px)`, transition: "right 0.3s ease" }}>
+      <div className={`pointer-events-auto absolute flex min-h-0 flex-col overflow-hidden ${PANEL_CLASSES}`}
+        style={panelLayoutStyle}>
         {resizeHandle}
-        <div className="flex items-center gap-2 border-b border-stone-200/40 px-4 py-3">
+        <div className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3">
           <button onClick={() => setView("history")} className="text-stone-400 hover:text-stone-700">
             <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
           </button>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-stone-800 truncate">{session.finalRoute?.name ?? "Council Session"}</p>
+            <p className="text-sm font-semibold text-stone-800 truncate">
+              {session.finalRoute?.name ?? (session.incomplete ? "Deliberation (draft)" : "Council Session")}
+            </p>
             <p className="text-xs text-stone-400">{fmtTime(session.timestamp)}</p>
           </div>
           <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -806,12 +965,12 @@ export function ChatPanel({
                 Full report
               </button>
             )}
-            <button onClick={onClose} className="text-stone-400 hover:text-stone-600">
+            <button type="button" onClick={handleClosePanel} className="text-stone-400 hover:text-stone-600">
               <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l10 10M11 1L1 11"/></svg>
             </button>
           </div>
         </div>
-        <div className="overflow-y-auto" style={{ minHeight: 0 }}>
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <SessionDetail session={session} />
         </div>
       </div>
@@ -820,12 +979,12 @@ export function ChatPanel({
 
   // ── Live view ─────────────────────────────────────────────────────────────────
   return (
-    <div className={`pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl shadow-xl ${PANEL_CLASSES}`}
-      style={{ width: panelSize.width, height: panelSize.height, maxHeight: "calc(100vh - 44px)", bottom: "22px", right: `calc(${rightOffset} + 30px)`, transition: "right 0.3s ease" }}>
+    <div className={`pointer-events-auto absolute flex min-h-0 flex-col overflow-hidden ${PANEL_CLASSES}`}
+      style={panelLayoutStyle}>
       {resizeHandle}
 
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-stone-200/60 px-4 py-3 shrink-0">
+      <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-stone-800">Transit Council</p>
           <p className="text-xs text-stone-400">{streaming ? "Deliberation in progress…" : "Deliberation complete"}</p>
@@ -842,7 +1001,7 @@ export function ChatPanel({
               {sessions.length}
             </button>
           )}
-          <button onClick={onClose} className="text-stone-400 hover:text-stone-600">
+          <button type="button" onClick={handleClosePanel} className="text-stone-400 hover:text-stone-600">
             <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l10 10M11 1L1 11"/></svg>
           </button>
         </div>
@@ -850,7 +1009,7 @@ export function ChatPanel({
 
       {/* Requirements chips */}
       {(neighbourhoodNames.length > 0 || stationNames.length > 0) && (
-        <div className="flex flex-wrap gap-1 border-b border-stone-200/40 px-4 py-2 shrink-0">
+        <div className="flex shrink-0 flex-wrap gap-1 border-b border-stone-200 px-4 py-2">
           {neighbourhoodNames.map((n) => <span key={n} className="rounded-full bg-stone-100 px-3 py-0.5 text-[11px] font-medium text-stone-600 border border-stone-200">{n}</span>)}
           {stationNames.map((s) => <span key={s} className="rounded-full bg-stone-100 border border-stone-200 px-3 py-0.5 text-[11px] font-medium text-stone-500">{s}</span>)}
         </div>
@@ -864,7 +1023,7 @@ export function ChatPanel({
       )}
 
       {/* Scrollable content */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
 
         {/* Agent list — vertical */}
         {topAgents.length > 0 && (

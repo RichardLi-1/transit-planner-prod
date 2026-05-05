@@ -171,6 +171,7 @@ export interface CouncilInput {
   extraContext?: string | null;
   existingLines?: ExistingStop[];
   provider?: string;
+  randomizeSpeakingOrder?: boolean;
 }
 
 // ── SSE / extraction helpers ───────────────────────────────────────────────────

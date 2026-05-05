@@ -208,6 +208,9 @@ export function TransitMap() {
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [experimentalFeatures, setExperimentalFeatures] = useState(false);
+  const [randomizeSpeakingOrder, setRandomizeSpeakingOrder] = useState(true);
+  /** Settings accordion: Advanced section starts collapsed. */
+  const [advancedSettingsExpanded, setAdvancedSettingsExpanded] = useState(false);
   const [showGoTrain, setShowGoTrain] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -652,6 +655,8 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     setShowTraffic(get("t_showTraffic"));
     setAdvancedMode(get("t_advancedMode"));
     setExperimentalFeatures(get("t_experimentalFeatures"));
+    const speakingOrder = localStorage.getItem("t_randomizeSpeakingOrder");
+    setRandomizeSpeakingOrder(speakingOrder === null ? true : speakingOrder === "1");
     setImperial(get("t_imperial"));
     setShowCoverageZones(get("t_showCoverageZones"));
     setShowServiceHeatmap(get("t_showServiceHeatmap"));
@@ -676,6 +681,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
   useEffect(() => { localStorage.setItem("t_showTraffic", showTraffic ? "1" : "0"); }, [showTraffic]);
   useEffect(() => { localStorage.setItem("t_experimentalFeatures", experimentalFeatures ? "1" : "0"); }, [experimentalFeatures]);
   useEffect(() => { localStorage.setItem("t_advancedMode", advancedMode ? "1" : "0"); }, [advancedMode]);
+  useEffect(() => { localStorage.setItem("t_randomizeSpeakingOrder", randomizeSpeakingOrder ? "1" : "0"); }, [randomizeSpeakingOrder]);
   useEffect(() => { localStorage.setItem("t_imperial", imperial ? "1" : "0"); }, [imperial]);
   useEffect(() => { localStorage.setItem("aiProvider", aiProvider); }, [aiProvider]);
   useEffect(() => {
@@ -1190,12 +1196,21 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
   }
 
 
+  function exitSelectToolToExplore() {
+    const draw = drawRef.current;
+    if (draw) draw.changeMode("simple_select");
+    setDrawMode("normal");
+    drawModeRef.current = "normal";
+  }
+
   function handleGenerate() {
     trackEvent("Council Started", {
       ...getAnalyticsContext(),
       selected_neighbourhoods: selectedNeighbourhoodsRef.current.size,
       selected_stations: selectedStationsRef.current.size,
     });
+    exitSelectToolToExplore();
+    setFocusedNeighbourhood(null);
     setCouncilStartNew(true);
     setCouncilHasRun(true);
     setCouncilOpen(true);
@@ -1203,6 +1218,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
   function handleViewCouncil() {
     trackEvent("Council Viewed", getAnalyticsContext());
+    exitSelectToolToExplore();
     setCouncilStartNew(false);
     setCouncilOpen(true);
   }
@@ -1218,7 +1234,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       // Clear neighbourhood selection when entering draw mode
       if (map && mapLoaded) {
         selectedNeighbourhoodsRef.current.forEach((id) => {
-          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false });
+          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false, brief: false });
         });
       }
       setSelectedNeighbourhoods(new Set());
@@ -1237,7 +1253,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       draw.changeMode("simple_select");
       if (map && mapLoaded) {
         selectedNeighbourhoodsRef.current.forEach((id) => {
-          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false });
+          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false, brief: false });
         });
       }
       setSelectedNeighbourhoods(new Set());
@@ -1257,7 +1273,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     }
     if (map && mapLoaded) {
       selectedNeighbourhoodsRef.current.forEach((id) => {
-        map.setFeatureState({ source: "neighbourhoods", id }, { selected: false });
+        map.setFeatureState({ source: "neighbourhoods", id }, { selected: false, brief: false });
       });
     }
     setSelectedNeighbourhoods(new Set());
@@ -1762,12 +1778,16 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           paint: {
             "fill-color": [
               "case",
+              ["boolean", ["feature-state", "brief"], false],
+              "#c2410c",
               ["boolean", ["feature-state", "selected"], false],
               "#6366f1",
               "#94a3b8",
             ],
             "fill-opacity": [
               "case",
+              ["boolean", ["feature-state", "brief"], false],
+              0.12,
               ["boolean", ["feature-state", "selected"], false],
               0.3,
               ["boolean", ["feature-state", "hovered"], false],
@@ -1787,21 +1807,33 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           paint: {
             "line-color": [
               "case",
+              ["boolean", ["feature-state", "brief"], false],
+              "#ea580c",
               ["boolean", ["feature-state", "selected"], false],
               "#6366f1",
               "#94a3b8",
             ],
             "line-width": [
               "case",
+              ["boolean", ["feature-state", "brief"], false],
+              2,
               ["boolean", ["feature-state", "selected"], false],
               3,
               0.5,
             ],
             "line-opacity": [
               "case",
+              ["boolean", ["feature-state", "brief"], false],
+              0.9,
               ["boolean", ["feature-state", "selected"], false],
               1,
               0.3,
+            ],
+            "line-dasharray": [
+              "case",
+              ["boolean", ["feature-state", "brief"], false],
+              ["literal", [2, 1.5]],
+              ["literal", [1, 0]],
             ],
           },
         },
@@ -1852,7 +1884,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         if (current.has(id)) {
           // Deselect this neighbourhood — clear the panel
           setFocusedNeighbourhood(null);
-          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false });
+          map.setFeatureState({ source: "neighbourhoods", id }, { selected: false, brief: false });
           setSelectedNeighbourhoods((prev) => {
             const next = new Set(prev);
             next.delete(id);
@@ -1864,7 +1896,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             (f) => f.properties?.AREA_SHORT_CODE === id
           );
           setFocusedNeighbourhood({ id, name: name ?? id, lat: e.lngLat.lat, lng: e.lngLat.lng, geometry: feat?.geometry ?? null });
-          map.setFeatureState({ source: "neighbourhoods", id }, { selected: true });
+          map.setFeatureState({ source: "neighbourhoods", id }, { selected: true, brief: false });
           setSelectedNeighbourhoods((prev) => new Set([...prev, id]));
         }
 
@@ -3872,6 +3904,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           r.stops.map((s) => ({ name: s.name, coords: s.coords, route: r.name }))
         )}
         routePanelOpen={generatedRoute !== null}
+        randomizeSpeakingOrder={randomizeSpeakingOrder}
         onRoutePreview={(routes) => setCouncilPreview(routes)}
         onToolCall={(evt) => onToolCallRef.current(evt)}
         onAddRoute={(parsed: ParsedRoute) => {
@@ -4167,6 +4200,49 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              {/* Advanced — collapsed by default; disclosure pattern keeps settings tidy. */}
+              <div className="border-b border-stone-100 py-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-stone-50 transition-colors"
+                  aria-expanded={advancedSettingsExpanded}
+                  onClick={() => setAdvancedSettingsExpanded((v) => !v)}
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-stone-300">Advanced</span>
+                  <svg
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${advancedSettingsExpanded ? "rotate-180" : ""}`}
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M3 4.5l3 3 3-3" />
+                  </svg>
+                </button>
+                {advancedSettingsExpanded && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRandomizeSpeakingOrder((v) => !v);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    <span className="min-w-0 flex-1 text-left">
+                      Randomize council speaking order
+                    </span>
+                    <span
+                      className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${highContrast ? (randomizeSpeakingOrder ? "bg-yellow-400" : "bg-black ring-2 ring-white") : randomizeSpeakingOrder ? "bg-stone-700" : "bg-stone-200"}`}
+                    >
+                      <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-transform ${highContrast ? (randomizeSpeakingOrder ? "bg-black translate-x-3.5" : "bg-[#ffffff] translate-x-0.5") : randomizeSpeakingOrder ? "bg-white translate-x-3.5" : "bg-white translate-x-0.5"}`} />
+                    </span>
+                  </button>
+                )}
               </div>
 
               {/* Danger zone */}

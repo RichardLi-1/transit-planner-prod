@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
-import { runCouncil, type ExistingStop } from "~/server/council";
+import { type ExistingStop } from "~/server/council";
+import { runCouncilGraph } from "~/server/council-graph";
 import { trackCouncilRequest } from "~/server/discord";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ interface CouncilRequestBody {
   context?: string | null;
   existing_lines?: ExistingStop[];
   provider?: string;
+  randomize_speaking_order?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -27,13 +29,14 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const encoder = new TextEncoder();
       try {
-        for await (const chunk of runCouncil({
+        for await (const chunk of runCouncilGraph({
           neighbourhoods: body.neighbourhoods ?? [],
           stations: body.stations ?? [],
           lineType: body.line_type,
           extraContext: body.context,
           existingLines: body.existing_lines ?? [],
           provider: body.provider,
+          randomizeSpeakingOrder: body.randomize_speaking_order ?? true,
         })) {
           controller.enqueue(encoder.encode(chunk));
         }
