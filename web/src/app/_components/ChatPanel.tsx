@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { RouteScore, OrchestratorDirective } from "~/server/council";
+import type { RouteScore, OrchestratorDirective, SimSummary } from "~/server/council";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -265,6 +265,29 @@ function RouteScoreCard({ agent, score, color }: { agent: string; score: RouteSc
   );
 }
 
+// ── Sim score card ────────────────────────────────────────────────────────────
+
+function SimScoreCard({ agent, sim, color }: { agent: string; sim: SimSummary; color: string }) {
+  const gained = sim.accessibilityGainPct > 0;
+  return (
+    <div className="flex-1 min-w-0 rounded-lg px-2.5 py-2 text-[11px]" style={{ background: `${color}06`, border: `1px solid ${color}25` }}>
+      <div className="flex items-center gap-1 mb-1">
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />
+        <span className="font-semibold truncate" style={{ color }}>{agent.split(" ")[0]} · Sim</span>
+        <span className={`ml-auto text-[10px] font-medium ${gained ? "text-emerald-500" : "text-stone-400"}`}>
+          {gained ? `+${sim.accessibilityGainPct.toFixed(1)}%` : "~"}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-stone-500">
+        <span>{sim.newlyAccessibleAgents} new riders</span>
+        <span>{sim.timeSavedMin > 0 ? `${sim.timeSavedMin.toFixed(1)}m saved` : "~"}</span>
+        <span>Equity {sim.equityImprovement >= 0 ? "+" : ""}{sim.equityImprovement.toFixed(1)}pts</span>
+        <span>{sim.transferReduction > 0 ? `-${sim.transferReduction.toFixed(1)} xfer` : "~"}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Orchestrator badge ────────────────────────────────────────────────────────
 
 const AGENT_LABEL: Record<string, string> = {
@@ -457,6 +480,7 @@ function FinalRecommendationCard({
   neighbourhoods,
   stations,
   timestamp,
+  simSummary,
 }: {
   route: ParsedRoute;
   commissionQuote?: string;
@@ -464,6 +488,7 @@ function FinalRecommendationCard({
   neighbourhoods: string[];
   stations: string[];
   timestamp: Date;
+  simSummary?: SimSummary | null;
 }) {
   return (
     <div className="mx-4 mb-4 rounded-xl overflow-hidden bg-white border border-stone-800 dark:border-stone-400"
@@ -477,6 +502,14 @@ function FinalRecommendationCard({
         </div>
         {commissionQuote && (
           <p className="text-[12px] text-stone-600 leading-snug italic mb-2">"{commissionQuote}"</p>
+        )}
+        {simSummary && (
+          <div className="flex gap-3 text-[11px] text-stone-500 bg-stone-50 rounded-lg px-2.5 py-1.5 mb-2" style={{ border: "1px solid #e7e5e4" }}>
+            <span className="text-emerald-600 font-medium">+{simSummary.accessibilityGainPct.toFixed(1)}% access</span>
+            <span>{simSummary.newlyAccessibleAgents} new riders</span>
+            <span>Equity {simSummary.equityImprovement >= 0 ? "+" : ""}{simSummary.equityImprovement.toFixed(1)}pts</span>
+            {simSummary.timeSavedMin > 0 && <span>{simSummary.timeSavedMin.toFixed(1)}m saved</span>}
+          </div>
         )}
         <div className="flex items-center justify-between pt-1.5 border-t border-stone-100">
           <p className="text-[11px] text-stone-400">✓ Added to map</p>
@@ -535,6 +568,8 @@ export function ChatPanel({
   const [routeScores, setRouteScores] = useState<Record<string, RouteScore>>({});
   const [orchestratorInfo, setOrchestratorInfo] = useState<OrchestratorDirective | null>(null);
   const [iterationInfo, setIterationInfo] = useState<IterationInfo | null>(null);
+  const [simScores, setSimScores] = useState<Record<string, SimSummary>>({});
+  const [finalSim, setFinalSim] = useState<SimSummary | null>(null);
   const [sessions, setSessions] = useState<Session[]>(() => {
     try {
       const raw = localStorage.getItem("council-sessions");
@@ -687,6 +722,8 @@ export function ChatPanel({
       setRouteScores({});
       setOrchestratorInfo(null);
       setIterationInfo(null);
+      setSimScores({});
+      setFinalSim(null);
       onRoutePreview?.(null);
     }
   }, [open, onRoutePreview]);
@@ -710,6 +747,8 @@ export function ChatPanel({
     setRouteScores({});
     setOrchestratorInfo(null);
     setIterationInfo(null);
+    setSimScores({});
+    setFinalSim(null);
     agentStatesRef.current = {};
     statusRef.current = [];
     proposedRoutesRef.current = [];
@@ -806,6 +845,13 @@ export function ChatPanel({
                 routeScoresRef.current = next;
                 return next;
               });
+
+            } else if (evt.type === "sim_update") {
+              const agentName = evt.agent as string;
+              setSimScores((prev) => ({ ...prev, [agentName]: evt.sim as SimSummary }));
+
+            } else if (evt.type === "sim_final") {
+              setFinalSim(evt.sim as SimSummary);
 
             } else if (evt.type === "orchestrator") {
               const directive = evt.directive as OrchestratorDirective;
@@ -1086,6 +1132,14 @@ export function ChatPanel({
                 return <RouteScoreCard key={agent} agent={agent} score={score} color={agentColor} />;
               })}
             </div>
+            {Object.keys(simScores).length > 0 && (
+              <div className="flex gap-2 mt-1.5">
+                {Object.entries(simScores).map(([agent, sim]) => {
+                  const agentColor = AGENTS_META[agent] ?? "#64748b";
+                  return <SimScoreCard key={agent} agent={agent} sim={sim} color={agentColor} />;
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -1126,6 +1180,7 @@ export function ChatPanel({
               neighbourhoods={neighbourhoodNames}
               stations={stationNames}
               timestamp={sessionTimestamp.current}
+              simSummary={finalSim}
             />
           </div>
         )}
