@@ -803,10 +803,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
     const DOT_COLOR: Record<string, string> = { low: "#f97316", mid: "#8b5cf6", high: "#06b6d4" };
 
-    // Determine simulated time range across all agents
-    // Each agent is active from departureMin to departureMin + totalMin
-    const simStart = Math.min(...animAgents.map((a) => a.departure_min));
-    const simEnd   = Math.max(...animAgents.map((a) => a.departure_min + (a.baseline_time || 60)));
+    // Use the selected time range from the simulation result so the clock
+    // accurately spans the window the user configured, not just the narrow
+    // band of agent departure times.
+    const simStart = simResults?.time_range?.start_min
+      ?? Math.min(...animAgents.map((a) => a.departure_min));
+    const simEnd   = simResults?.time_range?.end_min
+      ?? Math.max(...animAgents.map((a) => a.departure_min + (a.baseline_time || 60)));
     const simSpan  = Math.max(simEnd - simStart, 1);
 
     function toHHMM(mins: number): string {
@@ -912,7 +915,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     animFrameRef.current = requestAnimationFrame(frame);
 
     return cleanup;
-  }, [animAgents, mapLoaded]);
+  }, [animAgents, simResults, mapLoaded]);
 
   // GO train toggle — add or remove GO routes (and their map layers)
   const goTrainMountRef = useRef(true);
