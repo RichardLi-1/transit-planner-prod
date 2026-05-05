@@ -5,6 +5,7 @@ import { Auth0Provider } from "@auth0/nextjs-auth0/client";
 import MobileWarningModal from "./_components/MobileWarningModal";
 import VercelRedirectModal from "./_components/VercelRedirectModal";
 import MixpanelInit from "./_components/MixpanelInit";
+import PreviewBuildBadge from "./_components/PreviewBuildBadge";
 import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
 
@@ -35,6 +36,7 @@ export default function RootLayout({
           <MixpanelInit />
           <MobileWarningModal />
           <VercelRedirectModal />
+          <PreviewBuildBadge />
           {children}
         </Auth0Provider>
         <Analytics />
