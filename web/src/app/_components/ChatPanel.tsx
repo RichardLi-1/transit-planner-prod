@@ -522,6 +522,11 @@ export function ChatPanel({
   routePanelOpen?: boolean;
   randomizeSpeakingOrder?: boolean;
 }) {
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [statusMessages, setStatusMessages] = useState<string[]>([]);
   const [proposedRoutes, setProposedRoutes] = useState<ProposedRoute[]>([]);
@@ -615,7 +620,6 @@ export function ChatPanel({
     ) {
       upsertCouncilSession(buildCouncilSnapshot({ incomplete: true }));
     }
-    abortControllerRef.current?.abort();
     onClose();
   }
 
@@ -667,6 +671,9 @@ export function ChatPanel({
 
   useEffect(() => {
     if (!open) {
+      // If the council is still streaming, keep state so reopening brings the user
+      // back to the in-progress council (and we already snapshot to history on close).
+      if (hasStarted.current && !doneReceivedRef.current) return;
       hasStarted.current = false;
       setAgentStates({});
       agentStatesRef.current = {};
@@ -781,7 +788,7 @@ export function ChatPanel({
               // Dedup: only speak if this exact quote hasn't been spoken yet
               if (!spokenQuotesRef.current.has(quote)) {
                 spokenQuotesRef.current.add(quote);
-                void speakQuote(evtAgent, quote);
+                if (openRef.current) void speakQuote(evtAgent, quote);
               }
 
             } else if (evt.type === "agent_end" && evtAgent) {

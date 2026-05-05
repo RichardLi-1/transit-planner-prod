@@ -187,6 +187,7 @@ export function TransitMap() {
   const [drawMode, setDrawMode] = useState<DrawMode>("normal");
   const [councilOpen, setCouncilOpen] = useState(false);
   const [councilHasRun, setCouncilHasRun] = useState(false);
+  const [councilRunning, setCouncilRunning] = useState(false);
   const [councilStartNew, setCouncilStartNew] = useState(false);
   const [councilPreview, setCouncilPreview] = useState<Array<{ color: string; stops: { name: string; coords: [number, number] }[] }> | null>(null);
 
@@ -1203,6 +1204,41 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     drawModeRef.current = "normal";
   }
 
+  function applyGeneratedNeighbourhoodHighlight() {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const selectedIds = selectedNeighbourhoodsRef.current;
+    const allFeatures = neighbourhoodsGeoJSONRef.current?.features ?? [];
+
+    // Convert the neighbourhood polygons from the interactive "selected" look
+    // (indigo) to the "generated" look (brief/orange), so Explore mode isn't sloppy.
+    for (const f of allFeatures) {
+      const id = f.properties?.AREA_SHORT_CODE as string | undefined;
+      if (!id) continue;
+      const on = selectedIds.has(id);
+      map.setFeatureState(
+        { source: "neighbourhoods", id },
+        { selected: false, brief: on, hovered: false },
+      );
+    }
+  }
+
+  function clearNeighbourhoodSelectionAfterGeneration() {
+    const map = mapRef.current;
+    if (map && mapLoaded) {
+      // Remove both the interactive "selected" look and the "generated" brief/orange look.
+      for (const id of selectedNeighbourhoodsRef.current) {
+        map.setFeatureState(
+          { source: "neighbourhoods", id },
+          { selected: false, brief: false, hovered: false },
+        );
+      }
+    }
+    setFocusedNeighbourhood(null);
+    setSelectedNeighbourhoods(new Set());
+    selectedNeighbourhoodsRef.current = new Set();
+  }
+
   function handleGenerate() {
     trackEvent("Council Started", {
       ...getAnalyticsContext(),
@@ -1210,15 +1246,18 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       selected_stations: selectedStationsRef.current.size,
     });
     exitSelectToolToExplore();
+    applyGeneratedNeighbourhoodHighlight();
     setFocusedNeighbourhood(null);
     setCouncilStartNew(true);
     setCouncilHasRun(true);
+    setCouncilRunning(true);
     setCouncilOpen(true);
   }
 
   function handleViewCouncil() {
     trackEvent("Council Viewed", getAnalyticsContext());
     exitSelectToolToExplore();
+    applyGeneratedNeighbourhoodHighlight();
     setCouncilStartNew(false);
     setCouncilOpen(true);
   }
@@ -3797,24 +3836,37 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           )}
           <div className="flex gap-3">
           {hasSelection && !councilOpen && (
-            <button
-              onClick={handleGenerate}
-              className="pointer-events-auto flex h-13 items-center gap-3 rounded-xl bg-stone-900 px-8 text-base font-medium text-white shadow-lg transition-all hover:bg-stone-800"
-            >
-              <span className="text-xl">✦</span>
-              Generate Route
-            </button>
-          )}
-          {councilHasRun && !councilOpen && (
-            <button
-              onClick={handleViewCouncil}
-              className="pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-stone-300 bg-white px-6 text-base font-medium text-stone-700 shadow-lg transition-all hover:bg-stone-50"
-            >
-              <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 2"/>
-              </svg>
-              View Council
-            </button>
+            <>
+              {!councilRunning && !councilHasRun && (
+                <button
+                  onClick={handleGenerate}
+                  className="pointer-events-auto flex h-13 items-center gap-3 rounded-xl bg-stone-900 px-8 text-base font-medium text-white shadow-lg transition-all hover:bg-stone-800"
+                >
+                  <span className="text-xl">✦</span>
+                  Generate Route
+                </button>
+              )}
+              {councilRunning && (
+                <button
+                  onClick={handleViewCouncil}
+                  className="pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-stone-300 bg-white px-6 text-base font-medium text-stone-700 shadow-lg transition-all hover:bg-stone-50"
+                >
+                  <span className="inline-flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                  Route generating…
+                </button>
+              )}
+              {!councilRunning && councilHasRun && (
+                <button
+                  onClick={handleViewCouncil}
+                  className="pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-stone-300 bg-white px-6 text-base font-medium text-stone-700 shadow-lg transition-all hover:bg-stone-50"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 2"/>
+                  </svg>
+                  View Council
+                </button>
+              )}
+            </>
           )}
           </div>
         </div>
@@ -3890,7 +3942,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {/* Chat panel — bottom right, above zoom controls */}
       <ChatPanel
         open={councilOpen}
-        onClose={() => setCouncilOpen(false)}
+        onClose={() => {
+          setCouncilOpen(false);
+        }}
         startNew={councilStartNew}
         neighbourhoodNames={
           [...selectedNeighbourhoods].map(
@@ -3965,6 +4019,8 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             },
           });
           setCouncilHasRun(true);
+          setCouncilRunning(false);
+          clearNeighbourhoodSelectionAfterGeneration();
         }}
       />
 
