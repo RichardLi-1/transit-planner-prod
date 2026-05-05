@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import type { RouteScore, OrchestratorDirective } from "~/server/council";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,12 @@ type AgentState = {
 
 type ProposedRoute = { label: string; route: ParsedRoute };
 
+type IterationInfo = {
+  round: number;
+  converged: boolean;
+  reason: string;
+};
+
 type Session = {
   id: string;
   timestamp: Date;
@@ -47,6 +54,16 @@ type Session = {
 // ── Agent column order ─────────────────────────────────────────────────────────
 
 const AGENT_ORDER = ["Alex Chen", "Jordan Park", "Margaret Thompson", "Devon Walsh", "Alex & Jordan"];
+
+// Agent name → brand color (mirrors council.ts AGENTS registry)
+const AGENTS_META: Record<string, string> = {
+  "Alex Chen": "#2563eb",
+  "Jordan Park": "#16a34a",
+  "Margaret Thompson": "#dc2626",
+  "Devon Walsh": "#d97706",
+  "Alex & Jordan": "#7c3aed",
+  "Planning Commission": "#64748b",
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -214,6 +231,73 @@ const MD = {
   h2: ({ children }: { children: React.ReactNode }) => <p className="font-semibold text-stone-600">{children}</p>,
   h3: ({ children }: { children: React.ReactNode }) => <p className="font-medium text-stone-600">{children}</p>,
 };
+
+// ── Score card ────────────────────────────────────────────────────────────────
+
+function RouteScoreCard({ agent, score, color }: { agent: string; score: RouteScore; color: string }) {
+  const hasViolations = score.hardConstraintsFailed.length > 0;
+  return (
+    <div className="flex-1 min-w-0 rounded-lg px-2.5 py-2 text-[11px]" style={{ background: `${color}08`, border: `1px solid ${color}30` }}>
+      <div className="flex items-center gap-1 mb-1">
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />
+        <span className="font-semibold truncate" style={{ color }}>{agent.split(" ")[0]}</span>
+        {hasViolations
+          ? <span className="ml-auto text-[10px] text-red-400 font-medium">{score.hardConstraintsFailed.length} issue{score.hardConstraintsFailed.length !== 1 ? "s" : ""}</span>
+          : <span className="ml-auto text-[10px] text-emerald-500 font-medium">✓</span>
+        }
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-stone-500">
+        <span>{score.stopCount} stops · {score.totalKm.toFixed(1)}km</span>
+        <span>${score.estimatedCostBn.toFixed(1)}B est.</span>
+        <span>{score.connectivity} transfer{score.connectivity !== 1 ? "s" : ""}</span>
+        <span>Gap {(score.gapScore * 100).toFixed(0)}%</span>
+      </div>
+      {hasViolations && (
+        <p className="mt-1 text-[10px] text-red-400 truncate">{score.hardConstraintsFailed[0]}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Orchestrator badge ────────────────────────────────────────────────────────
+
+const AGENT_LABEL: Record<string, string> = {
+  nimby: "NIMBY",
+  pr: "PR",
+  equity: "Equity",
+  cost: "Cost",
+};
+
+function OrchestratorBadge({ directive, iterationInfo }: { directive: OrchestratorDirective; iterationInfo: { round: number; converged: boolean; reason: string } | null }) {
+  return (
+    <div className="mx-4 mb-2 rounded-xl px-3 py-2 text-[11px]" style={{ background: "#f5f0ff", border: "1px solid #7c3aed30" }}>
+      <div className="flex items-center gap-2 mb-1">
+        <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-violet-500" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="6" r="5"/><path d="M6 4v2l1.5 1.5"/>
+        </svg>
+        <span className="font-semibold text-violet-700">Orchestrator</span>
+        {iterationInfo && (
+          <span className="ml-auto text-[10px] text-violet-400">
+            {iterationInfo.converged ? "✓ done" : `round ${iterationInfo.round + 1}/3`}
+          </span>
+        )}
+      </div>
+      <p className="text-stone-500 mb-1.5">{directive.reasoning}</p>
+      <div className="flex flex-wrap gap-1">
+        {directive.activeAgents.map((a) => (
+          <span key={a} className="rounded-full px-2 py-0.5 font-medium text-violet-700" style={{ background: "#7c3aed18" }}>
+            {AGENT_LABEL[a] ?? a}
+          </span>
+        ))}
+        {directive.focusPoints.map((fp, i) => (
+          <span key={i} className="rounded-full px-2 py-0.5 text-stone-500" style={{ background: "#f0f0f0" }}>
+            {fp}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ── Single agent card ─────────────────────────────────────────────────────────
 
@@ -385,6 +469,9 @@ export function ChatPanel({
   const [proposedRoutes, setProposedRoutes] = useState<ProposedRoute[]>([]);
   const [finalRoute, setFinalRoute] = useState<ParsedRoute | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [routeScores, setRouteScores] = useState<Record<string, RouteScore>>({});
+  const [orchestratorInfo, setOrchestratorInfo] = useState<OrchestratorDirective | null>(null);
+  const [iterationInfo, setIterationInfo] = useState<IterationInfo | null>(null);
   const [sessions, setSessions] = useState<Session[]>(() => {
     try {
       const raw = localStorage.getItem("council-sessions");
@@ -463,6 +550,9 @@ export function ChatPanel({
       spokenQuotesRef.current = new Set();
       setFinalRoute(null);
       setStreaming(false);
+      setRouteScores({});
+      setOrchestratorInfo(null);
+      setIterationInfo(null);
       onRoutePreview?.(null);
     }
   }, [open, onRoutePreview]);
@@ -473,6 +563,9 @@ export function ChatPanel({
     setStatusMessages([]);
     setProposedRoutes([]);
     setFinalRoute(null);
+    setRouteScores({});
+    setOrchestratorInfo(null);
+    setIterationInfo(null);
     agentStatesRef.current = {};
     statusRef.current = [];
     proposedRoutesRef.current = [];
@@ -559,6 +652,20 @@ export function ChatPanel({
                 agentStatesRef.current = { ...agentStatesRef.current, [evtAgent]: { ...prev, done: true, route } };
                 setAgentStates({ ...agentStatesRef.current });
               }
+
+            } else if (evt.type === "score_update") {
+              const agentName = evt.agent as string;
+              setRouteScores((prev) => ({ ...prev, [agentName]: evt.score as RouteScore }));
+
+            } else if (evt.type === "orchestrator") {
+              setOrchestratorInfo(evt.directive as OrchestratorDirective);
+
+            } else if (evt.type === "iteration") {
+              setIterationInfo({
+                round: evt.round as number,
+                converged: evt.converged as boolean,
+                reason: evt.reason as string,
+              });
 
             } else if (evt.type === "tool_call") {
               onToolCall?.(evt as unknown as ToolCallEvent);
@@ -801,6 +908,24 @@ export function ChatPanel({
           <div className="px-4">
             <AgentCard state={commission} isActive={activeAgent === "Planning Commission"} />
           </div>
+        )}
+
+        {/* Route score cards */}
+        {Object.keys(routeScores).length > 0 && (
+          <div className="px-4 pt-2 pb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 mb-1.5">Route Scores</p>
+            <div className="flex gap-2">
+              {Object.entries(routeScores).map(([agent, score]) => {
+                const agentColor = AGENTS_META[agent] ?? "#64748b";
+                return <RouteScoreCard key={agent} agent={agent} score={score} color={agentColor} />;
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Orchestrator directive */}
+        {orchestratorInfo && (
+          <OrchestratorBadge directive={orchestratorInfo} iterationInfo={iterationInfo} />
         )}
 
         {/* Proposed routes */}

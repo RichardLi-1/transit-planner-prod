@@ -65,6 +65,7 @@ yarn-error.log*
 *.qix
 filtered_output.csv
 sorted_output.csv
+CLAUDE.md
 
 # Optional: uncomment if you don't commit sqlc-generated Go
 # db/db/*.go
