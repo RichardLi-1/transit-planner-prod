@@ -12,6 +12,37 @@ type Version = {
 
 const VERSIONS: Version[] = [
   {
+    version: "v0.6",
+    date: "05/05/2026",
+    headline: "Council debate. Simulation rework.",
+    subline: "LangGraph. Dynamic time.",
+    entries: [
+      {
+        section: "AI Council",
+        items: [
+          "LangGraph-based council option — debate runs as a structured state graph for cleaner turn sequencing",
+          "Cycle through past council outputs without re-running a debate",
+          "Council panel open/close and generation state now reflected correctly in the UI",
+          "Simulation data injected into council context — agents reason about ridership and travel time scores",
+        ],
+      },
+      {
+        section: "Simulation",
+        items: [
+          "Simulation variables panel — configure peak hour multiplier, base ridership, and capacity per vehicle type",
+          "Equity score accessibility: simulation now surfaces transit equity metrics alongside ridership",
+          "Dynamic time window — drag the time slider to any hour; simulation updates live without replaying from zero",
+        ],
+      },
+      {
+        section: "Preview builds",
+        items: [
+          "\"Preview\" badge shown automatically on test. and beta. hostnames to distinguish staging from production",
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.5",
     date: "04/03/2026",
     headline: "Transit deserts. Custom overlays.",
