@@ -2,6 +2,8 @@ import "server-only";
 
 import { getProvider } from "./ai-provider";
 import type { ToolDefinition } from "./ai-provider";
+import { runSimulation } from "./simulation";
+import type { ProposedLine, SimulationResult } from "./simulation";
 
 // ── Models ─────────────────────────────────────────────────────────────────────
 
@@ -162,6 +164,25 @@ export interface OrchestratorDirective {
   focusPoints: string[];
   terminateEarly: boolean;
   reasoning: string;
+}
+
+export interface SimSummary {
+  routeName: string;
+  baselinePctAccessible: number;
+  scenarioPctAccessible: number;
+  accessibilityGainPct: number;
+  timeSavedMin: number;
+  baselineAvgTransitMin: number;
+  scenarioAvgTransitMin: number;
+  transferReduction: number;
+  equityBaselineScore: number;
+  equityScenarioScore: number;
+  equityImprovement: number;
+  incomeBreakdown: { baseline: Record<string, number>; scenario: Record<string, number> };
+  newlyAccessibleAgents: number;
+  topStressSegments: Array<{ fromStop: string; toStop: string; stressPct: number }>;
+  agentCount: number;
+  runDurationS: number;
 }
 
 export interface CouncilInput {
@@ -405,6 +426,94 @@ export function shouldTerminate(
   return { done: false, reason: "" };
 }
 
+// ── Simulation helpers ─────────────────────────────────────────────────────────
+
+// Convert raw SimulationResult to a compact, LLM-friendly summary.
+function toSimSummary(result: SimulationResult, routeName: string): SimSummary {
+  return {
+    routeName,
+    baselinePctAccessible:  result.baseline.pctAccessible,
+    scenarioPctAccessible:  result.scenario.pctAccessible,
+    accessibilityGainPct:   result.delta.accessibilityGainPct,
+    timeSavedMin:           result.delta.timeSavedMin,
+    baselineAvgTransitMin:  result.baseline.avgTransitMin,
+    scenarioAvgTransitMin:  result.scenario.avgTransitMin,
+    transferReduction:      result.delta.transferReduction,
+    equityBaselineScore:    result.equity.baselineScore,
+    equityScenarioScore:    result.equity.scenarioScore,
+    equityImprovement:      result.delta.equityImprovement,
+    incomeBreakdown: {
+      baseline: result.baseline.incomeBreakdown,
+      scenario: result.scenario.incomeBreakdown,
+    },
+    newlyAccessibleAgents:  result.delta.newlyAccessibleAgents,
+    topStressSegments:      result.lineStress.slice(0, 3).map((s) => ({
+      fromStop:  s.fromStop,
+      toStop:    s.toStop,
+      stressPct: s.stressPct,
+    })),
+    agentCount:   result.agentCount,
+    runDurationS: result.runDurationS,
+  };
+}
+
+// Convert a raw route object to the ProposedLine shape expected by runSimulation.
+function routeToProposedLine(route: Record<string, unknown>): ProposedLine {
+  const stops = route.stops as Array<{ name: string; coords: [number, number] }>;
+  return {
+    name:  (route.name as string)  ?? "Proposed",
+    type:  (route.type as string)  ?? "subway",
+    stops: stops.map((s) => ({ name: s.name, coords: s.coords })),
+  };
+}
+
+// Return a role-specific sim context string for each debate agent.
+// Agents only receive the dimensions relevant to their mandate.
+function formatSimForAgent(
+  simA: SimSummary | null,
+  simB: SimSummary | null,
+  agentKey: "equity" | "cost" | "nimby" | "pr",
+): string {
+  const sims = [simA, simB].filter((s): s is SimSummary => s !== null);
+  if (sims.length === 0) return "";
+
+  const lines: string[] = ["\n\n## Simulation data (150-agent model)"];
+
+  for (const sim of sims) {
+    if (agentKey === "equity") {
+      lines.push(
+        `**${sim.routeName}**: Equity ${sim.equityBaselineScore.toFixed(0)} → ${sim.equityScenarioScore.toFixed(0)} ` +
+        `(${sim.equityImprovement >= 0 ? "+" : ""}${sim.equityImprovement.toFixed(1)} pts). ` +
+        `Accessibility ${sim.baselinePctAccessible.toFixed(1)}% → ${sim.scenarioPctAccessible.toFixed(1)}% ` +
+        `(+${sim.accessibilityGainPct.toFixed(1)}%). ${sim.newlyAccessibleAgents} newly reached. ` +
+        `Income access (avg transit min) — ` +
+        Object.entries(sim.incomeBreakdown.scenario).map(([k, v]) => `${k}: ${(v as number).toFixed(0)}min`).join(", "),
+      );
+    } else if (agentKey === "cost") {
+      lines.push(
+        `**${sim.routeName}**: ${sim.newlyAccessibleAgents} new riders. ` +
+        `Avg time saved: ${sim.timeSavedMin > 0 ? sim.timeSavedMin.toFixed(1) + " min/rider" : "no improvement"}. ` +
+        `Transfers reduced by ${sim.transferReduction.toFixed(2)}. ` +
+        `Transit time: ${sim.baselineAvgTransitMin.toFixed(0)}min → ${sim.scenarioAvgTransitMin.toFixed(0)}min.`,
+      );
+    } else if (agentKey === "nimby") {
+      const stress = sim.topStressSegments.length
+        ? sim.topStressSegments.map((s) => `${s.fromStop}→${s.toStop} (${s.stressPct.toFixed(0)}% load)`).join("; ")
+        : "no high-stress segments";
+      lines.push(`**${sim.routeName}**: Highest-traffic segments (construction pressure): ${stress}.`);
+    } else {
+      // pr
+      lines.push(
+        `**${sim.routeName}**: +${sim.accessibilityGainPct.toFixed(1)}% accessibility gain, ` +
+        `${sim.newlyAccessibleAgents} new riders. ` +
+        `Equity ${sim.equityImprovement >= 0 ? "improves" : "worsens"} by ${Math.abs(sim.equityImprovement).toFixed(1)} pts. ` +
+        `Commute ${sim.timeSavedMin > 0 ? "improves by " + sim.timeSavedMin.toFixed(1) + " min" : "unchanged"}.`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
 // ── LLM helpers ────────────────────────────────────────────────────────────────
 
 // Compress a long agent output to 3–5 bullet points via Haiku.
@@ -428,8 +537,29 @@ async function orchestratorTurn(
   scoreA: RouteScore,
   scoreB: RouteScore,
   jaccard: number,
+  simA: SimSummary | null,
+  simB: SimSummary | null,
   providerName?: string,
 ): Promise<OrchestratorDirective> {
+  const simSection = simA ?? simB
+    ? `\nSimulation (150-agent model):\n` +
+      (simA
+        ? `Route A: +${simA.accessibilityGainPct.toFixed(1)}% accessibility, ` +
+          `equity ${simA.equityImprovement >= 0 ? "+" : ""}${simA.equityImprovement.toFixed(1)}pts, ` +
+          `${simA.newlyAccessibleAgents} new riders, time saved ${simA.timeSavedMin.toFixed(1)}min\n`
+        : "") +
+      (simB
+        ? `Route B: +${simB.accessibilityGainPct.toFixed(1)}% accessibility, ` +
+          `equity ${simB.equityImprovement >= 0 ? "+" : ""}${simB.equityImprovement.toFixed(1)}pts, ` +
+          `${simB.newlyAccessibleAgents} new riders, time saved ${simB.timeSavedMin.toFixed(1)}min\n`
+        : "")
+    : "";
+
+  // Derive sim-based activation flags
+  const lowEquity = (simA && simA.equityImprovement < 1.0) || (simB && simB.equityImprovement < 1.0);
+  const lowRidership = (simA && simA.newlyAccessibleAgents < 10) || (simB && simB.newlyAccessibleAgents < 10);
+  const missesPopulation = (simA && simA.accessibilityGainPct < 1.0) && (simB && simB.accessibilityGainPct < 1.0);
+
   const prompt =
     `Route A (Alex - Ridership): ${scoreA.stopCount} stops, ${scoreA.totalKm.toFixed(1)}km, ` +
     `$${scoreA.estimatedCostBn.toFixed(1)}B, ${scoreA.connectivity} transfers, ` +
@@ -438,8 +568,9 @@ async function orchestratorTurn(
     `Route B (Jordan - Cost): ${scoreB.stopCount} stops, ${scoreB.totalKm.toFixed(1)}km, ` +
     `$${scoreB.estimatedCostBn.toFixed(1)}B, ${scoreB.connectivity} transfers, ` +
     `${scoreB.spacingViolations} spacing violations, gap score ${(scoreB.gapScore * 100).toFixed(0)}%\n` +
-    `Violations B: ${scoreB.hardConstraintsFailed.slice(0, 3).join("; ") || "none"}\n\n` +
-    `Route similarity (Jaccard): ${(jaccard * 100).toFixed(0)}%\n\n` +
+    `Violations B: ${scoreB.hardConstraintsFailed.slice(0, 3).join("; ") || "none"}\n` +
+    simSection +
+    `\nRoute similarity (Jaccard): ${(jaccard * 100).toFixed(0)}%\n\n` +
     `Output ONLY a JSON object:\n` +
     `{\n` +
     `  "activeAgents": ["nimby", "pr"],\n` +
@@ -451,8 +582,9 @@ async function orchestratorTurn(
     `- terminateEarly: true only if both routes have 0 hard violations, gap score ≥ 0.9, and similarity ≥ 50%\n` +
     `- Include "nimby" if spacing violations > 0 or either route passes through dense residential areas\n` +
     `- Include "pr" if cost > $3B or spacing violations > 1\n` +
-    `- Include "equity" if connectivity < 2 (few connections to existing network)\n` +
-    `- Include "cost" if totalKm > 15 or estimatedCostBn > 7.5\n` +
+    `- Include "equity" if connectivity < 2 (few connections to existing network)${lowEquity ? " — FORCE INCLUDE (equity improvement < 1pt)" : ""}\n` +
+    `- Include "cost" if totalKm > 15 or estimatedCostBn > 7.5${lowRidership ? " — FORCE INCLUDE (fewer than 10 new riders)" : ""}\n` +
+    (missesPopulation ? `- IMPORTANT: Both routes have <1% accessibility gain — add focus point about missing population centers\n` : "") +
     `- focusPoints: 2–3 specific issues to address (e.g. "Stop X too close to Bloor station")`;
 
   let raw = "";
@@ -676,14 +808,46 @@ export async function* runCouncil(input: CouncilInput): AsyncGenerator<string> {
     let fullN = "", fullPr = "";
     let iterationsDone = 0;
 
+    // ── PHASE 2.5: SIM_SEED (parallel, 150 agents each) ──────────────────────
+    yield sse({ type: "status", text: "Running transit simulations…" });
+    let simA: SimSummary | null = null;
+    let simB: SimSummary | null = null;
+    const canSimA = routeA !== null && scoreA.hardConstraintsFailed.length <= 3;
+    const canSimB = routeB !== null && scoreB.hardConstraintsFailed.length <= 3;
+
+    if (canSimA || canSimB) {
+      try {
+        const [rawSimA, rawSimB] = await Promise.all([
+          canSimA
+            ? runSimulation({ proposed: [routeToProposedLine(routeA!)], agentCount: 150, seed: 42, timeRange: { startMin: 360, endMin: 1440 } })
+            : Promise.resolve(null),
+          canSimB
+            ? runSimulation({ proposed: [routeToProposedLine(routeB!)], agentCount: 150, seed: 42, timeRange: { startMin: 360, endMin: 1440 } })
+            : Promise.resolve(null),
+        ]);
+        if (rawSimA) {
+          simA = toSimSummary(rawSimA, (routeA!.name as string) ?? "Route A");
+          yield sse({ type: "sim_update", agent: "Alex Chen", sim: simA });
+        }
+        if (rawSimB) {
+          simB = toSimSummary(rawSimB, (routeB!.name as string) ?? "Route B");
+          yield sse({ type: "sim_update", agent: "Jordan Park", sim: simB });
+        }
+      } catch (simErr) {
+        yield sse({ type: "sim_skip", reason: `Simulation error: ${String(simErr)}` });
+      }
+    } else {
+      yield sse({ type: "sim_skip", reason: "Routes have too many hard constraint failures" });
+    }
+
     // ── PHASE 3: ORCHESTRATE → DEBATE LOOP (max 3 iterations) ─────────────────
     for (let iter = 0; iter < 3; iter++) {
       const term = shouldTerminate([scoreA, scoreB], iter, jaccard);
       yield sse({ type: "iteration", round: iter, converged: term.done, reason: term.reason });
       if (term.done) break;
 
-      // Orchestrator decides which agents to activate based on score vectors
-      const directive = await orchestratorTurn(scoreA, scoreB, jaccard, providerName);
+      // Orchestrator decides which agents to activate based on score vectors + sim data
+      const directive = await orchestratorTurn(scoreA, scoreB, jaccard, simA, simB, providerName);
       yield sse({ type: "orchestrator", directive });
 
       if (directive.terminateEarly) break;
@@ -698,7 +862,8 @@ export async function* runCouncil(input: CouncilInput): AsyncGenerator<string> {
           ag("nimby"), sessions["nimby"]!,
           `Alex's proposal:\n${routeA ? JSON.stringify(routeA, null, 2) : "(none)"}\n\n` +
           `Jordan's proposal:\n${routeB ? JSON.stringify(routeB, null, 2) : "(none)"}\n\n` +
-          `Affected areas: ${neighbourhoods.join(", ") || "Toronto"}.${focusContext}\n\n` +
+          `Affected areas: ${neighbourhoods.join(", ") || "Toronto"}.${focusContext}` +
+          formatSimForAgent(simA, simB, "nimby") + "\n\n" +
           "Identify 2–3 most disruptive stations across both proposals on merit. NIMBY scores + mitigations.",
           providerName,
         )) { yield chunk; fullN = full; }
@@ -708,7 +873,8 @@ export async function* runCouncil(input: CouncilInput): AsyncGenerator<string> {
         for await (const { chunk, full } of turn(
           ag("pr"), sessions["pr"]!,
           `**Alex:** ${fullA.slice(0, 300)}…\n**Jordan:** ${fullB.slice(0, 300)}…\n` +
-          `**NIMBY:** ${fullN.slice(0, 200) || "no concerns raised yet"}${focusContext}\n\n` +
+          `**NIMBY:** ${fullN.slice(0, 200) || "no concerns raised yet"}${focusContext}` +
+          formatSimForAgent(simA, simB, "pr") + "\n\n" +
           "Score top 3 stations on Displacement/Noise/Gentrification/EnvJustice. Overall PR score /40. " +
           "Flag redundant stops (<800m to existing, no transfer value). One highest-impact recommendation.",
           providerName,
@@ -773,6 +939,23 @@ export async function* runCouncil(input: CouncilInput): AsyncGenerator<string> {
     )) { yield chunk; fullCom = full; if (route) routeCom = route; }
 
     const routeFinal = routeCom ?? routeReb ?? routeB ?? routeA;
+
+    // ── PHASE 4.5: SIM_FINAL (500 agents on winning route) ───────────────────
+    if (routeFinal) {
+      yield sse({ type: "status", text: "Running final simulation…" });
+      try {
+        const rawFinal = await runSimulation({
+          proposed: [routeToProposedLine(routeFinal)],
+          agentCount: 500,
+          seed: 42,
+          timeRange: { startMin: 360, endMin: 1440 },
+        });
+        yield sse({ type: "sim_final", sim: toSimSummary(rawFinal, (routeFinal.name as string) ?? "Final Route") });
+      } catch (simErr) {
+        yield sse({ type: "status", text: `Final simulation error: ${String(simErr)}` });
+      }
+    }
+
     if (routeFinal) {
       let prScore: number | undefined;
       for (const src of [fullCom, fullPr]) {
