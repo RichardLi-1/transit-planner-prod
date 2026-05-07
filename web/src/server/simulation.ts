@@ -299,7 +299,9 @@ export interface StressSegment {
   fromCoords: [number, number];
   toCoords: [number, number];
   agentTrips: number;
+  baselineTrips: number;
   stressPct: number;
+  deltaPct: number;
 }
 
 interface RunStats {
@@ -878,35 +880,69 @@ function equityScore(agents: SimAgent[], legResults: LegRouteResult[]): number {
   return +(weightedAccessible / weightedTotal * 100).toFixed(1);
 }
 
-function computeProposedStress(_baseline: LegRouteResult[], scenario: LegRouteResult[], proposed: ProposedLine[]): StressSegment[] {
-  if (!proposed.length) return [];
-  const counter = new Map<string, { seg: StressSegment; count: number }>();
-  for (const r of scenario) {
-    for (const e of r.edgesUsed) {
-      if (e.kind !== "proposed") continue;
-      const key = `${e.fromName}|${e.toName}`;
-      if (!counter.has(key)) counter.set(key, { seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 }, count: 0 });
-      counter.get(key)!.count++;
-    }
-  }
-  const records = [...counter.values()].sort((a, b) => b.count - a.count);
-  const maxTrips = records[0]?.count ?? 1;
-  return records.map(({ seg, count }) => ({ ...seg, agentTrips: count, stressPct: +(count / maxTrips * 100).toFixed(1) }));
-}
+function computeAllStress(
+  baseResults: LegRouteResult[],
+  scenResults: LegRouteResult[],
+  proposed: ProposedLine[],
+  topN = 80,
+): { existingStress: StressSegment[]; proposedStress: StressSegment[] } {
+  type SegInfo = { lineName: string; fromStop: string; toStop: string; fromCoords: [number, number]; toCoords: [number, number] };
 
-function computeBaselineStress(results: LegRouteResult[], topN = 80): StressSegment[] {
-  const counter = new Map<string, { seg: StressSegment; count: number }>();
-  for (const r of results) {
-    for (const e of r.edgesUsed) {
-      if (e.kind !== "transit") continue;
-      const key = `${e.fromName}|${e.toName}`;
-      if (!counter.has(key)) counter.set(key, { seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat], agentTrips: 0, stressPct: 0 }, count: 0 });
-      counter.get(key)!.count++;
+  const countEdges = (results: LegRouteResult[], kind: "transit" | "proposed") => {
+    const counter = new Map<string, { seg: SegInfo; count: number }>();
+    for (const r of results) {
+      for (const e of r.edgesUsed) {
+        if (e.kind !== kind) continue;
+        const key = `${e.fromName}|${e.toName}`;
+        if (!counter.has(key)) counter.set(key, { seg: { lineName: e.routeName, fromStop: e.fromName, toStop: e.toName, fromCoords: [e.fromLon, e.fromLat], toCoords: [e.toLon, e.toLat] }, count: 0 });
+        counter.get(key)!.count++;
+      }
     }
+    return counter;
+  };
+
+  const baseCounter = countEdges(baseResults, "transit");
+  const scenCounter = countEdges(scenResults, "transit");
+  const propCounter = proposed.length ? countEdges(scenResults, "proposed") : new Map<string, { seg: SegInfo; count: number }>();
+
+  // Global max across all segment counts — shared denominator for stress_pct
+  const globalMax = Math.max(
+    ...[...baseCounter.values()].map((v) => v.count),
+    ...[...scenCounter.values()].map((v) => v.count),
+    ...[...propCounter.values()].map((v) => v.count),
+    1,
+  );
+
+  // Existing edges: union of base+scen keys, sorted by scenario load
+  const existingKeys = new Set([...baseCounter.keys(), ...scenCounter.keys()]);
+  const existingRecords: { baseCount: number; scenCount: number; seg: SegInfo }[] = [];
+  for (const key of existingKeys) {
+    const baseCount = baseCounter.get(key)?.count ?? 0;
+    const scenCount = scenCounter.get(key)?.count ?? 0;
+    existingRecords.push({ baseCount, scenCount, seg: (scenCounter.get(key) ?? baseCounter.get(key))!.seg });
   }
-  const records = [...counter.values()].sort((a, b) => b.count - a.count).slice(0, topN);
-  const maxTrips = records[0]?.count ?? 1;
-  return records.map(({ seg, count }) => ({ ...seg, agentTrips: count, stressPct: +(count / maxTrips * 100).toFixed(1) }));
+  existingRecords.sort((a, b) => (b.scenCount || b.baseCount) - (a.scenCount || a.baseCount));
+
+  const existingStress: StressSegment[] = existingRecords.slice(0, topN).map((r) => ({
+    ...r.seg,
+    agentTrips: r.scenCount,
+    baselineTrips: r.baseCount,
+    stressPct: +(r.scenCount / globalMax * 100).toFixed(1),
+    deltaPct: +((r.baseCount - r.scenCount) / globalMax * 100).toFixed(1),
+  }));
+
+  // Proposed edges: new lines only
+  const proposedStress: StressSegment[] = [...propCounter.values()]
+    .sort((a, b) => b.count - a.count)
+    .map((r) => ({
+      ...r.seg,
+      agentTrips: r.count,
+      baselineTrips: 0,
+      stressPct: +(r.count / globalMax * 100).toFixed(1),
+      deltaPct: 0,
+    }));
+
+  return { existingStress, proposedStress };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -969,6 +1005,7 @@ export async function runSimulation(opts: {
   }
 
   const newlyAccessible = perAgent.filter((p) => p.newlyAccessible).length;
+  const { existingStress, proposedStress } = computeAllStress(baseResults, scenResults, opts.proposed);
 
   return {
     hasProposedLines: hasProposed,
@@ -986,8 +1023,8 @@ export async function runSimulation(opts: {
       newlyAccessibleAgents: newlyAccessible,
     },
     equity: { baselineScore: baseEquity, scenarioScore: scenEquity },
-    lineStress:          computeProposedStress(baseResults, scenResults, opts.proposed),
-    baselineEdgeStress:  computeBaselineStress(baseResults),
+    lineStress:         proposedStress,
+    baselineEdgeStress: existingStress,
     perAgent,
     graphStats: { nodes: baseStops.size, edges: [...baseGraph.values()].reduce((n, es) => n + es.length, 0) },
   };

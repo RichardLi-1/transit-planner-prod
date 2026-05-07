@@ -39,7 +39,9 @@ export interface StressSegment {
   from_coords: [number, number];
   to_coords: [number, number];
   agent_trips: number;
+  baseline_trips: number;
   stress_pct: number;
+  delta_pct: number;
   edge_pk?: number;
 }
 
@@ -172,25 +174,49 @@ function ScoreBadge({ label, value, color }: { label: string; value: number; col
   );
 }
 
-function StressBar({ segment }: { segment: StressSegment }) {
-  const color =
+function StressBar({ segment, isProposed }: { segment: StressSegment; isProposed: boolean }) {
+  // Bar fill always reflects absolute load (global scale)
+  const loadColor =
     segment.stress_pct > 75 ? "#ef4444"
     : segment.stress_pct > 40 ? "#f59e0b"
     : "#10b981";
 
+  // Delta badge for existing lines
+  const delta = segment.baseline_trips - segment.agent_trips;
+  const deltaLabel =
+    isProposed ? null
+    : delta > 2  ? `▼ ${delta}`
+    : delta < -2 ? `▲ ${Math.abs(delta)}`
+    : null;
+  const deltaColor = delta > 2 ? "#10b981" : "#ef4444";
+
   return (
     <div className="flex items-center gap-2 py-1">
       <div className="flex-1 min-w-0">
-        <p className="truncate text-xs text-stone-700 font-medium">
-          {segment.from_stop} → {segment.to_stop}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className="truncate text-xs text-stone-700 font-medium">
+            {segment.from_stop} → {segment.to_stop}
+          </p>
+          {isProposed && (
+            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-px">
+              new
+            </span>
+          )}
+        </div>
         <p className="text-[10px] text-stone-400">
-          {segment.agent_trips} trips{segment.line_name ? ` · ${segment.line_name}` : ""}
+          {segment.agent_trips} trips
+          {!isProposed && segment.baseline_trips > 0 && ` · was ${segment.baseline_trips}`}
+          {segment.line_name ? ` · ${segment.line_name}` : ""}
         </p>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {deltaLabel && (
+          <span className="text-[10px] font-semibold w-10 text-right" style={{ color: deltaColor }}>
+            {deltaLabel}
+          </span>
+        )}
         <div className="w-16 h-1.5 rounded-full bg-stone-100">
-          <div className="h-full rounded-full" style={{ width: `${segment.stress_pct}%`, backgroundColor: color }} />
+          <div className="h-full rounded-full" style={{ width: `${segment.stress_pct}%`, backgroundColor: loadColor }} />
         </div>
         <span className="text-[10px] font-mono text-stone-500 w-8 text-right">
           {segment.stress_pct.toFixed(0)}%
@@ -553,37 +579,45 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
               </div>
             )}
 
-            {activeTab === "stress" && (
-              <div className="space-y-3">
-                {result.has_proposed_lines && result.line_stress.length > 0 && (
+            {activeTab === "stress" && (() => {
+              // Merge proposed + existing into one list, sorted by stress_pct descending
+              const allSegs = [
+                ...result.line_stress.map((s) => ({ seg: s, isProposed: true })),
+                ...result.baseline_edge_stress.map((s) => ({ seg: s, isProposed: false })),
+              ].sort((a, b) => b.seg.stress_pct - a.seg.stress_pct);
+
+              return (
+                <div className="space-y-3">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">Proposed line load</p>
-                    <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50">
-                      {result.line_stress.map((seg, i) => <StressBar key={i} segment={seg} />)}
-                    </div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">
+                      Network load — all segments, shared scale
+                    </p>
+                    {allSegs.length === 0 ? (
+                      <p className="text-xs text-stone-400 py-2 text-center">No stress data.</p>
+                    ) : (
+                      <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50 max-h-72 overflow-y-auto">
+                        {allSegs.map(({ seg, isProposed }, i) => (
+                          <StressBar key={i} segment={seg} isProposed={isProposed} />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
 
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-1">
-                    {result.has_proposed_lines ? "Busiest existing segments" : "Network stress (busiest segments)"}
-                  </p>
-                  {result.baseline_edge_stress.length === 0 ? (
-                    <p className="text-xs text-stone-400 py-2 text-center">No stress data.</p>
-                  ) : (
-                    <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50 max-h-64 overflow-y-auto">
-                      {result.baseline_edge_stress.map((seg, i) => <StressBar key={i} segment={seg} />)}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-stone-400">
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Low load</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Medium</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> High load</span>
+                    {result.has_proposed_lines && (
+                      <>
+                        <span className="flex items-center gap-1 text-violet-500 font-medium">new = proposed line</span>
+                        <span className="flex items-center gap-1 text-emerald-600">▼ = trips relieved</span>
+                        <span className="flex items-center gap-1 text-red-500">▲ = more loaded</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-
-                <div className="flex gap-3 text-[10px] text-stone-400">
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Low</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Medium</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> High</span>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {activeTab === "narrative" && result.has_proposed_lines && (
               <div className="space-y-3">

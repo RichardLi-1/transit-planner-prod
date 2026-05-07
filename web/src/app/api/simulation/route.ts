@@ -52,7 +52,9 @@ function convertStressSegment(seg: StressSegment) {
     from_coords: seg.fromCoords,
     to_coords: seg.toCoords,
     agent_trips: seg.agentTrips,
+    baseline_trips: seg.baselineTrips,
     stress_pct: seg.stressPct,
+    delta_pct: seg.deltaPct,
   };
 }
 

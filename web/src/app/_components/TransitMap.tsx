@@ -724,43 +724,29 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     }
   }, [simState, routes, mapLoaded]);
 
-  // Simulation stress overlay — two layers:
-  //   sim-baseline-stress : top existing edges coloured by agent load
-  //   sim-proposed-stress : proposed new line segments coloured by load
+  // Simulation stress overlay — two layers on a shared global scale:
+  //   sim-baseline-stress : existing edges, colored by relief delta (green=relieved, red=more loaded)
+  //   sim-proposed-stress : new line segments, colored by absolute load, dashed
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    const BASE_SRC  = "sim-baseline-stress-source";
-    const BASE_LYR  = "sim-baseline-stress-layer";
-    const PROP_SRC  = "sim-proposed-stress-source";
-    const PROP_LYR  = "sim-proposed-stress-layer";
+    const BASE_SRC = "sim-baseline-stress-source";
+    const BASE_LYR = "sim-baseline-stress-layer";
+    const PROP_SRC = "sim-proposed-stress-source";
+    const PROP_LYR = "sim-proposed-stress-layer";
 
-    const toFeature = (seg: { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }) => ({
+    type StressSeg = { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; delta_pct: number; from_stop: string; to_stop: string; agent_trips: number; baseline_trips: number };
+
+    const toFeature = (seg: StressSeg) => ({
       type: "Feature" as const,
-      properties: { stress_pct: seg.stress_pct, label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips})` },
+      properties: {
+        stress_pct: seg.stress_pct,
+        delta_pct: seg.delta_pct,
+        label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips}${seg.baseline_trips ? `, was ${seg.baseline_trips}` : ""})`,
+      },
       geometry: { type: "LineString" as const, coordinates: [seg.from_coords, seg.to_coords] },
     });
-
-    const addOrUpdate = (srcId: string, lyrId: string, segs: typeof simResults extends null ? never[] : { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; from_stop: string; to_stop: string; agent_trips: number }[], opacity: number, widthRange: [number, number]) => {
-      const geojson = { type: "FeatureCollection" as const, features: segs.map(toFeature) };
-      if (map.getSource(srcId)) {
-        (map.getSource(srcId) as mapboxgl.GeoJSONSource).setData(geojson);
-      } else {
-        map.addSource(srcId, { type: "geojson", data: geojson });
-        map.addLayer({
-          id: lyrId,
-          type: "line",
-          source: srcId,
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, widthRange[0], 100, widthRange[1]],
-            "line-color": ["interpolate", ["linear"], ["get", "stress_pct"], 0, "#10b981", 40, "#f59e0b", 75, "#ef4444"],
-            "line-opacity": opacity,
-          },
-        });
-      }
-    };
 
     if (!simResults) {
       [BASE_LYR, PROP_LYR].forEach((l) => { if (map.getLayer(l)) map.removeLayer(l); });
@@ -768,14 +754,52 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       return;
     }
 
-    // Baseline stress — existing edges, subtle
+    // Existing edges — width by scenario load, color by delta (green=relieved, amber=stable, red=more loaded)
     if (simResults.baseline_edge_stress.length > 0) {
-      addOrUpdate(BASE_SRC, BASE_LYR, simResults.baseline_edge_stress, 0.55, [2, 7]);
+      const geojson = { type: "FeatureCollection" as const, features: simResults.baseline_edge_stress.map(toFeature) };
+      if (map.getSource(BASE_SRC)) {
+        (map.getSource(BASE_SRC) as mapboxgl.GeoJSONSource).setData(geojson);
+      } else {
+        map.addSource(BASE_SRC, { type: "geojson", data: geojson });
+        map.addLayer({
+          id: BASE_LYR,
+          type: "line",
+          source: BASE_SRC,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, 2, 100, 8],
+            "line-color": [
+              "case",
+              [">", ["get", "delta_pct"], 8],  "#10b981",
+              ["<", ["get", "delta_pct"], -8], "#ef4444",
+              "#f59e0b",
+            ],
+            "line-opacity": 0.65,
+          },
+        });
+      }
     }
 
-    // Proposed line stress — bolder
+    // Proposed lines — same global scale width, absolute load color, dashed to distinguish
     if (simResults.line_stress.length > 0) {
-      addOrUpdate(PROP_SRC, PROP_LYR, simResults.line_stress, 0.9, [4, 12]);
+      const geojson = { type: "FeatureCollection" as const, features: simResults.line_stress.map(toFeature) };
+      if (map.getSource(PROP_SRC)) {
+        (map.getSource(PROP_SRC) as mapboxgl.GeoJSONSource).setData(geojson);
+      } else {
+        map.addSource(PROP_SRC, { type: "geojson", data: geojson });
+        map.addLayer({
+          id: PROP_LYR,
+          type: "line",
+          source: PROP_SRC,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, 3, 100, 10],
+            "line-color": ["interpolate", ["linear"], ["get", "stress_pct"], 0, "#10b981", 40, "#f59e0b", 75, "#ef4444"],
+            "line-dasharray": [2.5, 1.5],
+            "line-opacity": 0.95,
+          },
+        });
+      }
     }
   }, [simResults, mapLoaded]);
 
