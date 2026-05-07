@@ -26,6 +26,7 @@ import { ChangelogModal } from "./map/ChangelogModal";
 import { FeedbackModal } from "./map/FeedbackModal";
 import { ChatPanel, type ParsedRoute, type ToolCallEvent } from "./ChatPanel";
 import { SimulationPanel, type SimulationResult } from "./map/SimulationPanel";
+import { PlansPanel } from "./map/PlansPanel";
 import { useUser } from "@auth0/nextjs-auth0/client";
 import Image from "next/image";
 import { useOverlay } from "./map/hooks/useOverlay";
@@ -215,6 +216,10 @@ export function TransitMap() {
   const [showGoTrain, setShowGoTrain] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [showPlansPanel, setShowPlansPanel] = useState(false);
+  const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
+  const lastSavedRoutesRef = useRef<Route[] | null>(null);
+  const planIsDirty = currentPlanId !== null && routes !== lastSavedRoutesRef.current;
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [imperial, setImperial] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -1523,6 +1528,16 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     snapDebounceRef.current.set(routeId, timer);
   }
   triggerAutoSnapRef.current = triggerAutoSnap;
+
+  function handleLoadPlan(newRoutes: Route[], newHiddenRoutes: Set<string>, planId: string) {
+    snapshotHistory();
+    setRoutes(newRoutes);
+    routesRef.current = newRoutes;
+    setHiddenRoutes(newHiddenRoutes);
+    setCurrentPlanId(planId);
+    lastSavedRoutesRef.current = newRoutes;
+    setShowPlansPanel(false);
+  }
 
   function copyShareLink() {
     const center = mapRef.current?.getCenter().toArray() as [number, number] | undefined;
@@ -3587,7 +3602,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
         {/* Simulate button */}
         <button
-          onClick={() => setShowSimPanel((v) => !v)}
+          onClick={() => { setShowSimPanel((v) => !v); setShowPlansPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
             showSimPanel ? "text-violet-700 border-violet-300 bg-violet-50" : "text-stone-400"
           }`}
@@ -3597,6 +3612,20 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             style={{ background: showSimPanel ? "#7c3aed" : "#d1d5db" }}
           />
           Simulate
+        </button>
+
+        {/* Plans button */}
+        <button
+          onClick={() => { setShowPlansPanel((v) => !v); setShowSimPanel(false); }}
+          className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
+            showPlansPanel ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-[#D7D7D7] text-stone-400"
+          }`}
+        >
+          <span
+            className="h-3 w-3 shrink-0 rounded-full transition-colors"
+            style={{ background: showPlansPanel ? "#6366f1" : currentPlanId ? (planIsDirty ? "#f59e0b" : "#6366f1") : "#d1d5db" }}
+          />
+          Plans
         </button>
 
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
@@ -3779,6 +3808,29 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onClose={() => { setShowSimPanel(false); setSimResults(null); setAnimAgents(null); }}
           onResults={(r) => { setSimResults(r); setAnimAgents(null); }}
           onAnimate={(agents) => setAnimAgents(agents)}
+        />
+      </div>
+
+      {/* Plans panel — slides in from the right */}
+      <div
+        className={`pointer-events-none absolute right-6 bottom-6 flex items-start transition-all duration-300 ease-in-out z-10 ${
+          showPlansPanel && !selectedRoute && !showGeneratedPanel ? "translate-x-0" : "translate-x-[calc(100%+2.25rem)]"
+        }`}
+        style={{ top: "80px" }}
+      >
+        <PlansPanel
+          open={showPlansPanel}
+          routes={routes}
+          hiddenRoutes={hiddenRoutes}
+          currentPlanId={currentPlanId}
+          planIsDirty={planIsDirty}
+          authUser={authUser ?? null}
+          authLoading={authLoading}
+          onClose={() => setShowPlansPanel(false)}
+          onPlanLoaded={handleLoadPlan}
+          onCurrentPlanIdChange={setCurrentPlanId}
+          onMarkSaved={(r) => { lastSavedRoutesRef.current = r; }}
+          darkMode={darkMode}
         />
       </div>
 
