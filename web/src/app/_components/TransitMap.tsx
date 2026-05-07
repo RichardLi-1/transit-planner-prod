@@ -843,17 +843,19 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       return `${h % 12 === 0 ? 12 : h % 12}:${m.toString().padStart(2, "0")}${ampm}`;
     }
 
-    // Pre-compute cumulative distances for path interpolation
-    type AgentPath = {
+    // Pre-compute cumulative distances for path interpolation.
+    // Group all legs by agent_id so each physical agent is one animated dot
+    // that switches paths as the clock advances through their day.
+    type LegPath = {
       coords: [number, number][];
       cumDist: number[];
       totalDist: number;
-      color: string;
       departureMin: number;
       durationMin: number;
     };
+    type AgentPath = { legs: LegPath[]; color: string };
 
-    const paths: AgentPath[] = animAgents.map((a) => {
+    const buildLeg = (a: (typeof animAgents)[0]): LegPath => {
       const coords = a.path_coords;
       const cumDist: number[] = [0];
       for (let i = 1; i < coords.length; i++) {
@@ -864,16 +866,18 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         const aa = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
         cumDist.push(cumDist[i - 1]! + 6371000 * 2 * Math.asin(Math.sqrt(aa)));
       }
-      return {
-        coords, cumDist,
-        totalDist: cumDist[cumDist.length - 1] ?? 0,
-        color: DOT_COLOR[a.income] ?? "#8b5cf6",
-        departureMin: a.departure_min,
-        durationMin: Math.max(a.baseline_time, 1),
-      };
-    });
+      return { coords, cumDist, totalDist: cumDist[cumDist.length - 1] ?? 0, departureMin: a.departure_min, durationMin: Math.max(a.baseline_time, 1) };
+    };
 
-    function positionAt(path: AgentPath, t: number): [number, number] {
+    const agentMap = new Map<number, AgentPath>();
+    for (const a of animAgents) {
+      if (!agentMap.has(a.agent_id)) agentMap.set(a.agent_id, { legs: [], color: DOT_COLOR[a.income] ?? "#8b5cf6" });
+      agentMap.get(a.agent_id)!.legs.push(buildLeg(a));
+    }
+    for (const agent of agentMap.values()) agent.legs.sort((a, b) => a.departureMin - b.departureMin);
+    const paths = [...agentMap.values()];
+
+    function positionAt(path: LegPath, t: number): [number, number] {
       const target = t * path.totalDist;
       let lo = 0, hi = path.cumDist.length - 2;
       while (lo < hi) {
@@ -911,16 +915,15 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       setAnimClockLabel(toHHMM(simNow));
 
       const features: object[] = [];
-      for (const path of paths) {
-        const arrivalMin = path.departureMin + path.durationMin;
-        // Only show agent while they're actively travelling
-        if (simNow < path.departureMin || simNow > arrivalMin) continue;
-        // t = 0 at departure, 1 at arrival
-        const t = (simNow - path.departureMin) / path.durationMin;
-        const [lon, lat] = positionAt(path, t);
+      for (const agent of paths) {
+        // Find the leg this agent is currently on
+        const leg = agent.legs.find((l) => simNow >= l.departureMin && simNow <= l.departureMin + l.durationMin);
+        if (!leg) continue;
+        const t = (simNow - leg.departureMin) / leg.durationMin;
+        const [lon, lat] = positionAt(leg, t);
         features.push({
           type: "Feature",
-          properties: { color: path.color },
+          properties: { color: agent.color },
           geometry: { type: "Point", coordinates: [lon, lat] },
         });
       }
@@ -4636,7 +4639,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             </svg>
           </div>
           <div className="text-sm text-stone-700">
-            Animating <span className="font-semibold text-violet-700">{animAgents.length.toLocaleString()}</span> agents
+            Animating <span className="font-semibold text-violet-700">{new Set(animAgents.map((a) => a.agent_id)).size.toLocaleString()}</span> agents
           </div>
           {animClockLabel && (
             <div className="rounded-lg bg-stone-900 px-2.5 py-1 font-mono text-sm font-semibold text-white tabular-nums">
