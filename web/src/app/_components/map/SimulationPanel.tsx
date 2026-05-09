@@ -175,10 +175,10 @@ function ScoreBadge({ label, value, color }: { label: string; value: number; col
 }
 
 function StressBar({ segment, isProposed }: { segment: StressSegment; isProposed: boolean }) {
-  // Bar fill always reflects absolute load (global scale)
-  const loadColor =
-    segment.stress_pct > 75 ? "#ef4444"
-    : segment.stress_pct > 40 ? "#f59e0b"
+  // Both proposed and existing use green/amber/red on the same global scale.
+  // Existing lines are further colored by delta; proposed lines by absolute stress_pct.
+  const loadColor = segment.stress_pct > 66 ? "#ef4444"
+    : segment.stress_pct > 33 ? "#f59e0b"
     : "#10b981";
 
   // Delta badge for existing lines
@@ -604,14 +604,15 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                   </div>
 
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-stone-400">
+                    <p className="w-full font-semibold uppercase tracking-wide text-stone-300 mb-0.5">All lines — same global scale</p>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Low load</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Medium</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> High load</span>
                     {result.has_proposed_lines && (
                       <>
-                        <span className="flex items-center gap-1 text-violet-500 font-medium">new = proposed line</span>
-                        <span className="flex items-center gap-1 text-emerald-600">▼ = trips relieved</span>
-                        <span className="flex items-center gap-1 text-red-500">▲ = more loaded</span>
+                        <p className="w-full text-stone-300 mt-0.5">New lines shown dashed. Width = absolute load vs system max.</p>
+                        <span className="flex items-center gap-1 text-emerald-600">▼ = trips relieved from existing line</span>
+                        <span className="flex items-center gap-1 text-red-500">▲ = more loaded than baseline</span>
                       </>
                     )}
                   </div>

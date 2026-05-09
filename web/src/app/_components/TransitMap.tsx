@@ -12,7 +12,7 @@ import {
   type GeneratedRoute,
   type Route,
 } from "~/app/map/transit-data";
-import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape } from "./map/geo";
+import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape, sliceShapeBetween } from "./map/geo";
 import { NeighbourhoodPanel } from "./map/NeighbourhoodPanel";
 import { RoutePanel } from "./map/RoutePanel";
 import { GeneratedRoutePanel } from "./map/GeneratedRoutePanel";
@@ -731,7 +731,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
   // Simulation stress overlay — two layers on a shared global scale:
   //   sim-baseline-stress : existing edges, colored by relief delta (green=relieved, red=more loaded)
-  //   sim-proposed-stress : new line segments, colored by absolute load, dashed
+  //   sim-proposed-stress : new line segments, blue demand scale (light=low, dark=high), dashed
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -741,17 +741,42 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     const PROP_SRC = "sim-proposed-stress-source";
     const PROP_LYR = "sim-proposed-stress-layer";
 
-    type StressSeg = { from_coords: [number, number]; to_coords: [number, number]; stress_pct: number; delta_pct: number; from_stop: string; to_stop: string; agent_trips: number; baseline_trips: number };
+    type StressSeg = {
+      line_name?: string;
+      from_coords: [number, number]; to_coords: [number, number];
+      stress_pct: number; delta_pct: number;
+      from_stop: string; to_stop: string;
+      agent_trips: number; baseline_trips: number;
+    };
 
-    const toFeature = (seg: StressSeg) => ({
-      type: "Feature" as const,
-      properties: {
-        stress_pct: seg.stress_pct,
-        delta_pct: seg.delta_pct,
-        label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips}${seg.baseline_trips ? `, was ${seg.baseline_trips}` : ""})`,
-      },
-      geometry: { type: "LineString" as const, coordinates: [seg.from_coords, seg.to_coords] },
-    });
+    // Precompute smoothed shapes for every route so we can slice them per-segment.
+    // TTC routes from the static data have `shape` (intermediate waypoints); custom
+    // proposed routes may have a road-snapped `shape` from the draw tool.
+    const allRoutes = [...ROUTES, ...routes];
+    const routeShapes = new Map<string, [number, number][]>();
+    for (const r of allRoutes) {
+      if (r.stops.length >= 2) {
+        routeShapes.set(r.name, routeToGeoJSON(r).geometry.coordinates as [number, number][]);
+      }
+    }
+
+    // Build a GeoJSON feature using the route's actual smoothed shape for this segment,
+    // so stress lines follow the same curves as the underlying map layers.
+    const toFeature = (seg: StressSeg) => {
+      const shape = routeShapes.get(seg.line_name ?? "");
+      const coords: [number, number][] = shape
+        ? sliceShapeBetween(seg.from_coords, seg.to_coords, shape)
+        : [seg.from_coords, seg.to_coords];
+      return {
+        type: "Feature" as const,
+        properties: {
+          stress_pct: seg.stress_pct,
+          delta_pct: seg.delta_pct,
+          label: `${seg.from_stop}→${seg.to_stop} (${seg.agent_trips}${seg.baseline_trips ? `, was ${seg.baseline_trips}` : ""})`,
+        },
+        geometry: { type: "LineString" as const, coordinates: coords },
+      };
+    };
 
     if (!simResults) {
       [BASE_LYR, PROP_LYR].forEach((l) => { if (map.getLayer(l)) map.removeLayer(l); });
@@ -759,7 +784,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       return;
     }
 
-    // Existing edges — width by scenario load, color by delta (green=relieved, amber=stable, red=more loaded)
+    // Existing edges — width by scenario load (global scale), color by delta
     if (simResults.baseline_edge_stress.length > 0) {
       const geojson = { type: "FeatureCollection" as const, features: simResults.baseline_edge_stress.map(toFeature) };
       if (map.getSource(BASE_SRC)) {
@@ -785,7 +810,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       }
     }
 
-    // Proposed lines — same global scale width, absolute load color, dashed to distinguish
+    // Proposed lines — blue demand scale on the same global normalization as existing lines.
+    // Using blue (instead of green→red) makes it visually unambiguous that this is a
+    // different metric (absolute ridership demand) vs the existing-line delta coloring.
     if (simResults.line_stress.length > 0) {
       const geojson = { type: "FeatureCollection" as const, features: simResults.line_stress.map(toFeature) };
       if (map.getSource(PROP_SRC)) {
@@ -799,14 +826,19 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-width": ["interpolate", ["linear"], ["get", "stress_pct"], 0, 3, 100, 10],
-            "line-color": ["interpolate", ["linear"], ["get", "stress_pct"], 0, "#10b981", 40, "#f59e0b", 75, "#ef4444"],
+            // Same green/amber/red scale as existing lines, globally normalized; dashes distinguish as proposed
+            "line-color": ["case",
+              ["<", ["get", "stress_pct"], 33], "#10b981",
+              [">", ["get", "stress_pct"], 66], "#ef4444",
+              "#f59e0b",
+            ],
             "line-dasharray": [2.5, 1.5],
             "line-opacity": 0.95,
           },
         });
       }
     }
-  }, [simResults, mapLoaded]);
+  }, [simResults, mapLoaded, routes]);
 
   // Agent animation — clock-driven: simulated time runs from earliest departure
   // to latest arrival, compressed into 12 seconds of real time.

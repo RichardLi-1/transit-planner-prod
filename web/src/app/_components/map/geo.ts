@@ -165,6 +165,21 @@ export function snapToShape(p: Coord, routeCoords: Coord[]): Coord {
   return lerp2(routeCoords, linearPos(p, routeCoords));
 }
 
+/**
+ * Extract the sub-segment of a smoothed route polyline that lies between
+ * two stop coordinates, preserving all intermediate curve waypoints.
+ * Falls back to a straight 2-point segment if the shape is too short.
+ */
+export function sliceShapeBetween(from: Coord, to: Coord, shape: Coord[]): Coord[] {
+  if (shape.length < 2) return [from, to];
+  const p0 = linearPos(from, shape);
+  const p1 = linearPos(to,   shape);
+  if (Math.abs(p0 - p1) < 0.001) return [from, to];
+  const [a, b] = p0 <= p1 ? [p0, p1] : [p1, p0];
+  const slice = sliceLine(shape, a, b);
+  return p0 <= p1 ? slice : [...slice].reverse();
+}
+
 export function portalsToGeoJSON(route: Route): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: "FeatureCollection",
