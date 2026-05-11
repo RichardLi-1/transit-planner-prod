@@ -62,6 +62,7 @@ function convertResult(r: SimulationResult, scenarioName: string, narrative: str
   return {
     scenario_name: scenarioName,
     agent_count: r.agentCount,
+    animated_agent_count: r.animatedAgentCount,
     run_duration_s: r.runDurationS,
     has_proposed_lines: r.hasProposedLines,
     time_range: { start_min: r.timeRange.startMin, end_min: r.timeRange.endMin },

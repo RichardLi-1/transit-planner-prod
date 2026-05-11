@@ -64,6 +64,7 @@ export interface PerAgentResult {
 export interface SimulationResult {
   scenario_name: string;
   agent_count: number;
+  animated_agent_count: number;
   run_duration_s: number;
   has_proposed_lines: boolean;
   time_range: { start_min: number; end_min: number };
@@ -435,15 +436,16 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
             </label>
             <input
               type="range"
-              min={100} max={2000} step={100}
+              min={500} max={10_000} step={500}
               value={agentCount}
               onChange={(e) => setAgentCount(Number(e.target.value))}
               className="mt-1 w-full accent-violet-600"
             />
             <div className="flex justify-between text-[10px] text-stone-400">
-              <span>100 (fast)</span>
-              <span>2000 (thorough)</span>
+              <span>500 (fast)</span>
+              <span>10,000 (thorough)</span>
             </div>
+            <p className="text-[10px] text-stone-400 mt-0.5">Animation shows up to 500 agents; all agents count toward stats.</p>
           </div>
 
           <button
@@ -527,7 +529,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
 
                 {/* Time range badge */}
                 <p className="text-[10px] text-stone-400 text-center">
-                  {fmtMin(result.time_range.start_min)}–{fmtMin(result.time_range.end_min)} · {result.per_agent.length.toLocaleString()} legs shown · {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s
+                  {fmtMin(result.time_range.start_min)}–{fmtMin(result.time_range.end_min)} · {result.per_agent.length.toLocaleString()} legs · {result.animated_agent_count.toLocaleString()} animated / {result.agent_count.toLocaleString()} agents · {result.run_duration_s}s
                 </p>
 
                 <button

@@ -280,6 +280,7 @@ export interface ProposedLine { name: string; type: string; stops: ProposedLineS
 export interface SimulationResult {
   hasProposedLines: boolean;
   agentCount: number;
+  animatedAgentCount: number;
   runDurationS: number;
   timeRange: { startMin: number; endMin: number };
   baseline: RunStats;
@@ -498,15 +499,50 @@ function buildGraph(extra: ProposedLine[] = []): { graph: Graph; stops: Map<numb
 
 type HeapItem = [number, number];
 
+class MinHeap {
+  private data: HeapItem[] = [];
+  get size(): number { return this.data.length; }
+  push(item: HeapItem): void {
+    this.data.push(item);
+    this._bubbleUp(this.data.length - 1);
+  }
+  pop(): HeapItem | undefined {
+    if (this.data.length === 0) return undefined;
+    const top = this.data[0]!;
+    const last = this.data.pop()!;
+    if (this.data.length > 0) { this.data[0] = last; this._siftDown(0); }
+    return top;
+  }
+  private _bubbleUp(i: number): void {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.data[parent]![0] <= this.data[i]![0]) break;
+      [this.data[parent], this.data[i]] = [this.data[i]!, this.data[parent]!];
+      i = parent;
+    }
+  }
+  private _siftDown(i: number): void {
+    const n = this.data.length;
+    while (true) {
+      let smallest = i;
+      const l = 2 * i + 1, r = 2 * i + 2;
+      if (l < n && this.data[l]![0] < this.data[smallest]![0]) smallest = l;
+      if (r < n && this.data[r]![0] < this.data[smallest]![0]) smallest = r;
+      if (smallest === i) break;
+      [this.data[smallest], this.data[i]] = [this.data[i]!, this.data[smallest]!];
+      i = smallest;
+    }
+  }
+}
+
 function dijkstra(graph: Graph, src: number, dst: number): { dist: number; path: number[] } | null {
   const dist = new Map<number, number>();
   const prev = new Map<number, number>();
-  const heap: HeapItem[] = [[0, src]];
+  const heap = new MinHeap();
   dist.set(src, 0);
-
-  while (heap.length > 0) {
-    heap.sort((a, b) => a[0] - b[0]);
-    const [cost, u] = heap.shift()!;
+  heap.push([0, src]);
+  while (heap.size > 0) {
+    const [cost, u] = heap.pop()!;
     if (u === dst) {
       const path: number[] = [];
       let cur: number | undefined = dst;
@@ -947,6 +983,8 @@ function computeAllStress(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+const ANIM_SAMPLE = 500;
+
 export async function runSimulation(opts: {
   proposed: ProposedLine[];
   agentCount: number;
@@ -960,7 +998,7 @@ export async function runSimulation(opts: {
   const { graph: scenGraph, stops: scenStops } = hasProposed ? buildGraph(opts.proposed) : { graph: baseGraph, stops: baseStops };
 
   const dayProfile = generateDayProfile(opts.seed);
-  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 2000)), opts.seed, dayProfile);
+  const agents = await generateAgents(Math.max(50, Math.min(opts.agentCount, 10_000)), opts.seed, dayProfile);
 
   const baseResults = routeAllLegs(agents, baseGraph, baseStops);
   const scenResults = hasProposed ? routeAllLegs(agents, scenGraph, scenStops) : baseResults;
@@ -977,6 +1015,12 @@ export async function runSimulation(opts: {
   for (const r of baseResults) baseMap.set(`${r.agentId}-${r.legIndex}`, r);
   for (const r of scenResults) scenMap.set(`${r.agentId}-${r.legIndex}`, r);
 
+  const animSet = new Set<number>();
+  for (const a of agents) {
+    if (animSet.size >= ANIM_SAMPLE) break;
+    animSet.add(a.id);
+  }
+
   const perAgent: PerAgentDelta[] = [];
   for (const a of agents) {
     a.legs.forEach((leg, legIndex) => {
@@ -986,7 +1030,7 @@ export async function runSimulation(opts: {
       const s = scenMap.get(key) ?? b;
       const activeTrip = hasProposed ? s : b;
       let pathCoords: [number, number][] = [];
-      if (activeTrip.feasible && activeTrip.edgesUsed.length > 0) {
+      if (animSet.has(a.id) && activeTrip.feasible && activeTrip.edgesUsed.length > 0) {
         pathCoords = [[activeTrip.edgesUsed[0]!.fromLon, activeTrip.edgesUsed[0]!.fromLat]];
         for (const e of activeTrip.edgesUsed) pathCoords.push([e.toLon, e.toLat]);
       }
@@ -1010,6 +1054,7 @@ export async function runSimulation(opts: {
   return {
     hasProposedLines: hasProposed,
     agentCount: agents.length,
+    animatedAgentCount: animSet.size,
     runDurationS: +((Date.now() - t0) / 1000).toFixed(2),
     timeRange: { startMin, endMin },
     baseline: baseStats,
