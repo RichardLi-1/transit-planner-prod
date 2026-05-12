@@ -2426,9 +2426,18 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           // Geocode asynchronously and rename from temp name
           void reverseGeocodeStation(coords[0], coords[1]).then((geoName) => {
             if (!geoName) return;
-            setRoutes((prev) => prev.map((r) =>
-              r.id === lineId ? { ...r, stops: r.stops.map(s => s.name === tempName ? { ...s, name: geoName } : s) } : r
-            ));
+            setRoutes((prev) => {
+              const allStopNames = new Set(prev.flatMap((r) => r.stops.map((s) => s.name)));
+              let finalName = geoName;
+              if (allStopNames.has(finalName)) {
+                let n = 2;
+                while (allStopNames.has(`${geoName} (${n})`)) n++;
+                finalName = `${geoName} (${n})`;
+              }
+              return prev.map((r) =>
+                r.id === lineId ? { ...r, stops: r.stops.map(s => s.name === tempName ? { ...s, name: finalName } : s) } : r
+              );
+            });
           });
           return;
         }
