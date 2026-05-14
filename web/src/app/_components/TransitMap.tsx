@@ -4018,13 +4018,17 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             }}
             onClose={() => setStationPopup(null)}
             onDelete={() => { handleDeleteStop(stationPopup.name, stationPopup.routeId); setStationPopup(null); }}
-            onRename={!isCustom ? undefined : (newName) => {
+            onRename={(newName) => {
               const oldName = stationPopup.name;
               snapshotHistory();
               setRoutes((prev) => prev.map((r) => ({
                 ...r,
                 stops: r.stops.map((s) => s.name === oldName ? { ...s, name: newName } : s),
               })));
+              setGeneratedRoute((r) => r ? {
+                ...r,
+                stops: r.stops.map((s) => s.name === oldName ? { ...s, name: newName } : s),
+              } : r);
               setSelectedStop((s) => s === oldName ? newName : s);
               setStationPopup((p) => p ? { ...p, name: newName } : p);
             }}

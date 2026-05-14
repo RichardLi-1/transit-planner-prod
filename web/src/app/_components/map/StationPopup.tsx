@@ -143,7 +143,7 @@ export function StationPopup({
               }}
               className="min-w-0 flex-1 rounded border border-stone-300 bg-white px-1 py-0 text-sm font-semibold text-stone-800 outline-none focus:border-stone-500"
             />
-          ) : (
+          ) : onRename ? (
             <button
               onClick={startRename}
               title="Click to rename"
@@ -154,6 +154,8 @@ export function StationPopup({
                 <path d="M8.5 1.5a1.5 1.5 0 0 1 2.12 2.12L9.5 4.75 7.25 2.5l1.25-1Zm-1.5 1.5L1 9v2h2l6-6.25-1.75-1.75-.25-.25Z"/>
               </svg>
             </button>
+          ) : (
+            <span className="truncate text-sm font-semibold text-stone-800">{popup.name}</span>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
