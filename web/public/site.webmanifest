@@ -1,0 +1,16 @@
+{
+  "name": "Transit Planner",
+  "short_name": "Transit Planner",
+  "description": "AI-powered urban transit planning tool for city planners, students, and enthusiasts",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f0e17",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}
