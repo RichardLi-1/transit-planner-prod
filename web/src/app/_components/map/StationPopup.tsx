@@ -12,6 +12,7 @@ export function StationPopup({
   connectedRoutes,
   onClose,
   onDelete,
+  onDeleteFromAll,
   onAddTransfer,
   onRemoveTransfer,
   onRename,
@@ -23,6 +24,7 @@ export function StationPopup({
   connectedRoutes: Route[];
   onClose: () => void;
   onDelete: () => void;
+  onDeleteFromAll: () => void;
   onAddTransfer?: (targetRouteId: string) => void;
   onRemoveTransfer: (targetRouteId: string) => void;
   onRename?: (newName: string) => void;
@@ -38,6 +40,8 @@ export function StationPopup({
   // Estimate ridership as ~15% of population served
   const ridership = populationServed !== undefined ? Math.round(populationServed * 0.15) : undefined;
   
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
   // Inline rename state
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -161,7 +165,7 @@ export function StationPopup({
         <div className="flex shrink-0 items-center gap-1">
           {isDeletable && (
             <button
-              onClick={onDelete}
+              onClick={() => connectedRoutes.length > 0 ? setDeleteConfirm(true) : onDelete()}
               title="Remove station"
               className="rounded p-0.5 text-stone-300 hover:bg-red-50 hover:text-red-400 transition-colors"
             >
@@ -272,6 +276,31 @@ export function StationPopup({
               <span>{r.shortName}</span>
             </button>
           ))}
+        </div>
+      )}
+      {deleteConfirm && (
+        <div className="mt-2 border-t border-stone-100 pt-2">
+          <p className="mb-1.5 text-xs text-stone-500">Remove from which lines?</p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={onDelete}
+              className="flex-1 rounded-lg bg-stone-100 px-2 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition-colors"
+            >
+              This line
+            </button>
+            <button
+              onClick={onDeleteFromAll}
+              className="flex-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+            >
+              All lines
+            </button>
+            <button
+              onClick={() => setDeleteConfirm(false)}
+              className="rounded-lg px-2 py-1 text-xs text-stone-400 hover:text-stone-600 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>

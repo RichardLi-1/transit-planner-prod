@@ -1769,7 +1769,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     const route = routesRef.current.find((r) => r.id === routeId);
     snapshotHistory();
     setRoutes((prev) =>
-      prev.map((r) => r.id === routeId ? { ...r, shape: undefined, stops: r.stops.filter((s) => s.name !== stopName) } : r)
+      prev.map((r) => {
+        if (r.id !== routeId) return r;
+        const idx = r.stops.findIndex((s) => s.name === stopName);
+        if (idx === -1) return r;
+        const stops = [...r.stops.slice(0, idx), ...r.stops.slice(idx + 1)];
+        return { ...r, shape: undefined, stops };
+      })
     );
     trackEvent("Station Deleted", {
       ...getAnalyticsContext(),
@@ -1777,6 +1783,25 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       route_name: route?.name,
       route_type: route?.type,
       stop_name: stopName,
+    });
+  }
+
+  function handleDeleteStopFromAllRoutes(stopName: string) {
+    snapshotHistory();
+    setRoutes((prev) =>
+      prev.map((r) => {
+        const idx = r.stops.findIndex((s) => s.name === stopName);
+        if (idx === -1) return r;
+        const stops = [...r.stops.slice(0, idx), ...r.stops.slice(idx + 1)];
+        return { ...r, shape: undefined, stops };
+      })
+    );
+    setGeneratedRoute((r) => {
+      if (!r) return r;
+      const idx = r.stops.findIndex((s) => s.name === stopName);
+      if (idx === -1) return r;
+      const stops = [...r.stops.slice(0, idx), ...r.stops.slice(idx + 1)];
+      return { ...r, stops };
     });
   }
 
@@ -4018,6 +4043,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             }}
             onClose={() => setStationPopup(null)}
             onDelete={() => { handleDeleteStop(stationPopup.name, stationPopup.routeId); setStationPopup(null); }}
+            onDeleteFromAll={() => { handleDeleteStopFromAllRoutes(stationPopup.name); setStationPopup(null); }}
             onRename={(newName) => {
               const oldName = stationPopup.name;
               snapshotHistory();
