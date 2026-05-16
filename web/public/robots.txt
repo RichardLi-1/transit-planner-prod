@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /test-auth/
+Disallow: /anthropic-test/
+
+Sitemap: https://transitplanner.app/sitemap.xml
