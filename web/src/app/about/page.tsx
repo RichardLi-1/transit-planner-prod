@@ -1,6 +1,24 @@
+import { type Metadata } from "next";
 import Link from "next/link";
 import { InfoNav } from "../_components/InfoNav";
 import { InfoFooter } from "../_components/InfoFooter";
+
+export const metadata: Metadata = {
+  title: "About",
+  description:
+    "Transit Planner is a free web tool for drafting transit routes on an interactive map of Toronto, with an AI planning council that pressure-tests every proposal for ridership, cost, and community impact.",
+  openGraph: {
+    title: "About Transit Planner — Rethinking How Cities Plan Transit",
+    description:
+      "Learn about Transit Planner: a web app for urban transit design with AI-powered analysis, GTFS export, and live population data.",
+    url: "/about",
+  },
+  twitter: {
+    title: "About Transit Planner — Rethinking How Cities Plan Transit",
+    description:
+      "Learn about Transit Planner: a web app for urban transit design with AI-powered analysis, GTFS export, and live population data.",
+  },
+};
 
 const LAST_UPDATED = "March 16, 2026";
 const LINE_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#d97706", "#7c3aed", "#0891b2"];

@@ -1,7 +1,25 @@
+import { type Metadata } from "next";
 import Link from "next/link";
 import { InfoNav } from "../_components/InfoNav";
 import { InfoFooter } from "../_components/InfoFooter";
 import { DocsChatWidget } from "./_components/DocsChatWidget";
+
+export const metadata: Metadata = {
+  title: "Documentation",
+  description:
+    "User guides and technical reference for Transit Planner — the AI-assisted, map-first workspace for sketching transit lines, running AI council debates, and exporting GTFS feeds.",
+  openGraph: {
+    title: "Transit Planner Docs",
+    description:
+      "User guides and technical reference for Transit Planner.",
+    url: "/docs",
+  },
+  twitter: {
+    title: "Transit Planner Docs",
+    description:
+      "User guides and technical reference for Transit Planner.",
+  },
+};
 
 const LINE_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#d97706", "#7c3aed", "#0891b2"];
 
