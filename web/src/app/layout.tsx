@@ -9,9 +9,69 @@ import PreviewBuildBadge from "./_components/PreviewBuildBadge";
 import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
 
+const BASE_URL =
+  process.env.NEXT_PUBLIC_BASE_URL ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
 export const metadata: Metadata = {
-  title: "Transit Planner",
-  description: "Urban transit intelligence",
+  metadataBase: new URL(BASE_URL),
+  title: {
+    default: "Transit Planner",
+    template: "%s | Transit Planner",
+  },
+  description:
+    "AI-powered urban transit design tool. Draw subway, streetcar, and bus routes on an interactive map of Toronto, then watch an AI council of six agents debate ridership, cost, and community impact in real time.",
+  keywords: [
+    "transit planning",
+    "urban planning",
+    "subway map",
+    "Toronto transit",
+    "GTFS",
+    "AI planning",
+    "public transit",
+    "city planning",
+    "TTC",
+    "transit design",
+  ],
+  authors: [{ name: "Transit Planner" }],
+  creator: "Transit Planner",
+  publisher: "Transit Planner",
+  manifest: "/site.webmanifest",
+  openGraph: {
+    type: "website",
+    locale: "en_CA",
+    url: BASE_URL,
+    siteName: "Transit Planner",
+    title: "Transit Planner — AI-Powered Urban Transit Design",
+    description:
+      "Draw subway, LRT, and bus routes on a live map of Toronto. An AI council debates every proposal — ridership, cost, and neighbourhood impact included.",
+    images: [
+      {
+        url: "/transit-night.png",
+        width: 1200,
+        height: 630,
+        alt: "Transit Planner — AI-Powered Urban Transit Design",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Transit Planner — AI-Powered Urban Transit Design",
+    description:
+      "Draw subway, LRT, and bus routes on a live map of Toronto. An AI council debates every proposal in real time.",
+    images: ["/transit-night.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
