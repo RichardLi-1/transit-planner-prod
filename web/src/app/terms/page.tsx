@@ -1,6 +1,13 @@
+import { type Metadata } from "next";
 import Link from "next/link";
 import { InfoNav } from "../_components/InfoNav";
 import { InfoFooter } from "../_components/InfoFooter";
+
+export const metadata: Metadata = {
+  title: "Terms of Use",
+  description: "Terms of Use for Transit Planner — usage guidelines, limitations, and conditions for using the platform.",
+  robots: { index: true, follow: false },
+};
 
 const LAST_UPDATED = "March 16, 2026";
 

@@ -1,6 +1,13 @@
+import { type Metadata } from "next";
 import Link from "next/link";
 import { InfoNav } from "../_components/InfoNav";
 import { InfoFooter } from "../_components/InfoFooter";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "Privacy Policy for Transit Planner — how data is collected, stored, and handled in the application.",
+  robots: { index: true, follow: false },
+};
 
 const LAST_UPDATED = "April 22, 2026";
 
