@@ -99,9 +99,35 @@ const statusItems = [
   { title: "Expanded export formats (maps, datasets, and summary reporting)", status: "Partially implemented — GTFS export today; broader exports in the works", done: false },
 ];
 
+const aboutJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "About Transit Planner",
+  url: "https://transitplanner.app/about",
+  description:
+    "Transit Planner is a free web tool for drafting transit routes on an interactive map of Toronto, with an AI planning council that pressure-tests every proposal.",
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://transitplanner.app" },
+      { "@type": "ListItem", position: 2, name: "About", item: "https://transitplanner.app/about" },
+    ],
+  },
+  about: {
+    "@type": "SoftwareApplication",
+    name: "Transit Planner",
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Web",
+  },
+};
+
 export default function AboutPage() {
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#ffffff" }}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(aboutJsonLd) }}
+      />
       <InfoNav />
 
       {/* Hero */}
