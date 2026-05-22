@@ -18,6 +18,24 @@ export const metadata: Metadata = {
   },
 };
 
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Home", item: "https://transitplanner.app" },
+    { "@type": "ListItem", position: 2, name: "Docs", item: "https://transitplanner.app/docs" },
+    { "@type": "ListItem", position: 3, name: "User Guide", item: "https://transitplanner.app/docs/user" },
+  ],
+};
+
 export default function Page() {
-  return <UserDocsPage />;
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      <UserDocsPage />
+    </>
+  );
 }
