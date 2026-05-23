@@ -47,7 +47,7 @@ export const metadata: Metadata = {
       "Draw subway, LRT, and bus routes on a live map of Toronto. An AI council debates every proposal — ridership, cost, and neighbourhood impact included.",
     images: [
       {
-        url: "/transit-night.png",
+        url: "/opengraph-image",
         width: 1200,
         height: 630,
         alt: "Transit Planner — AI-Powered Urban Transit Design",
@@ -59,7 +59,7 @@ export const metadata: Metadata = {
     title: "Transit Planner — AI-Powered Urban Transit Design",
     description:
       "Draw subway, LRT, and bus routes on a live map of Toronto. An AI council debates every proposal in real time.",
-    images: ["/transit-night.png"],
+    images: ["/opengraph-image"],
   },
   robots: {
     index: true,
