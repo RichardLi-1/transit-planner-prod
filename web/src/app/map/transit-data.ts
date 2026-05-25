@@ -262,7 +262,7 @@ export const ROUTES: Route[] = [
     },
     stops: [
       // Ordered west → east
-      { name: "Sheppard–Yonge", coords: [-79.4102, 43.7616] },
+      { name: "Sheppard–Yonge", coords: [-79.4108, 43.7610] },
       { name: "Bayview",        coords: [-79.3867, 43.7669] },
       { name: "Bessarion",      coords: [-79.3763, 43.7692] },
       { name: "Leslie",         coords: [-79.3659, 43.7713] },
