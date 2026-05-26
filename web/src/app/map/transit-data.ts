@@ -84,7 +84,7 @@ export const ROUTES: Route[] = [
       { name: "Yorkdale",        coords: [-79.4475, 43.7246] },
       { name: "Lawrence West",   coords: [-79.4439, 43.7153] },
       { name: "Glencairn",       coords: [-79.4405, 43.7086] },
-      { name: "Eglinton West",   coords: [-79.4365, 43.7000] },
+      { name: "Cedarvale",        coords: [-79.435639, 43.698930] },
       { name: "St Clair West",   coords: [-79.4156, 43.6845] },
       { name: "Dupont",          coords: [-79.4069, 43.6743] },
       { name: "Spadina",         coords: [-79.4050, 43.6697] },
@@ -127,7 +127,7 @@ export const ROUTES: Route[] = [
       [-79.4475, 43.7246], // Yorkdale
       [-79.4439, 43.7153], // Lawrence West
       [-79.4405, 43.7086], // Glencairn
-      [-79.4365, 43.7000], // Eglinton West
+      [-79.435639, 43.698930], // Cedarvale
       [-79.4260, 43.6922], // curve — Allen corridor sweeps east
       [-79.4156, 43.6845], // St Clair West
       [-79.4069, 43.6743], // Dupont
