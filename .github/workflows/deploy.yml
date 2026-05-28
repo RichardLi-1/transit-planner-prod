@@ -98,13 +98,11 @@ jobs:
                export CONTAINER_NAME_PREFIX="genghis-routing-prod"
                SERVER_HOST_PORT="8080"
                FRONTEND_HOST_PORT="3000"
-               WEB_BACKEND_HOST_PORT="8000"
              else
                export COMPOSE_PROJECT_NAME="genghis-routing-development"
                export CONTAINER_NAME_PREFIX="genghis-routing-development"
                SERVER_HOST_PORT="18080"
                FRONTEND_HOST_PORT="13000"
-               WEB_BACKEND_HOST_PORT="18000"
              fi
 
              echo ""
@@ -117,7 +115,6 @@ jobs:
              echo "   Container Prefix: $CONTAINER_NAME_PREFIX"
              echo "   Server Port: $SERVER_HOST_PORT"
              echo "   Frontend Port: $FRONTEND_HOST_PORT"
-             echo "   Web Backend Port: $WEB_BACKEND_HOST_PORT"
              echo "=========================================="
              echo ""
 
@@ -191,22 +188,17 @@ jobs:
              export CONTAINER_NAME_PREFIX="$CONTAINER_NAME_PREFIX"
              export SERVER_HOST_PORT="$SERVER_HOST_PORT"
              export FRONTEND_HOST_PORT="$FRONTEND_HOST_PORT"
-             export WEB_BACKEND_HOST_PORT="$WEB_BACKEND_HOST_PORT"
-
-
 
              export PAT="${{ secrets.PAT }}"
              export REGISTRY="${{ vars.REGISTRY || secrets.REGISTRY || 'ghcr.io' }}"
              export IMAGE_PREFIX="${{ vars.IMAGE_PREFIX || secrets.IMAGE_PREFIX || github.repository_owner }}"
              export IMAGE_TAG="$DEPLOY_BRANCH"
              export SERVER_PORT="${{ vars.SERVER_PORT || secrets.SERVER_PORT || '8080' }}"
-             export WEB_BACKEND_URL="http://web-backend:8000"
              export DEPLOY_ENVIRONMENT="${{ vars.DEPLOY_ENVIRONMENT }}"
 
-
-             # Deploy web, web-backend
-             export COMPOSE_PROFILES="web,web-backend"
-             SERVICES="web web-backend"
+             # Deploy web
+             export COMPOSE_PROFILES="web"
+             SERVICES="web"
              export IMAGE_TAG="$DEPLOY_BRANCH"
              echo ""
              echo "=========================================="

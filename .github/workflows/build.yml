@@ -53,18 +53,6 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Extract metadata for web-backend image
-        id: meta-web-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/web-backend
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push web image
         uses: docker/build-push-action@v5
         with:
@@ -79,17 +67,6 @@ jobs:
             SUPABASE_URL=${{ secrets.SUPABASE_URL }}
             SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
             NEXT_PUBLIC_MAPBOX_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN}}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push web-backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.web-backend
-          push: true
-          tags: ${{ steps.meta-web-backend.outputs.tags }}
-          labels: ${{ steps.meta-web-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -189,13 +166,11 @@ jobs:
                export CONTAINER_NAME_PREFIX="genghis-routing-prod"
                SERVER_HOST_PORT="8080"
                FRONTEND_HOST_PORT="3000"
-               WEB_BACKEND_HOST_PORT="8000"
              else
                export COMPOSE_PROJECT_NAME="genghis-routing-development"
                export CONTAINER_NAME_PREFIX="genghis-routing-development"
                SERVER_HOST_PORT="18080"
                FRONTEND_HOST_PORT="13000"
-               WEB_BACKEND_HOST_PORT="18000"
              fi
 
              echo ""
@@ -208,7 +183,6 @@ jobs:
              echo "   Container Prefix: $CONTAINER_NAME_PREFIX"
              echo "   Server Port: $SERVER_HOST_PORT"
              echo "   Frontend Port: $FRONTEND_HOST_PORT"
-             echo "   Web Backend Port: $WEB_BACKEND_HOST_PORT"
              echo "=========================================="
              echo ""
 
@@ -259,22 +233,17 @@ jobs:
              export CONTAINER_NAME_PREFIX="$CONTAINER_NAME_PREFIX"
              export SERVER_HOST_PORT="$SERVER_HOST_PORT"
              export FRONTEND_HOST_PORT="$FRONTEND_HOST_PORT"
-             export WEB_BACKEND_HOST_PORT="$WEB_BACKEND_HOST_PORT"
-
-
 
              export PAT="${{ secrets.PAT }}"
              export REGISTRY="${{ vars.REGISTRY || secrets.REGISTRY || 'ghcr.io' }}"
              export IMAGE_PREFIX="${{ vars.IMAGE_PREFIX || secrets.IMAGE_PREFIX || github.repository_owner }}"
              export IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
              export SERVER_PORT="${{ vars.SERVER_PORT || secrets.SERVER_PORT || '8080' }}"
-             export WEB_BACKEND_URL="http://web-backend:8000"
              export DEPLOY_ENVIRONMENT="${{ vars.DEPLOY_ENVIRONMENT }}"
 
-
-             # Deploy web, web-backend
-            export COMPOSE_PROFILES="web,web-backend"
-            SERVICES="web web-backend"
+             # Deploy web
+            export COMPOSE_PROFILES="web"
+            SERVICES="web"
             export IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
             echo ""
             echo "=========================================="

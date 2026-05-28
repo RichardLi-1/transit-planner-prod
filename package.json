@@ -6,7 +6,6 @@
   ],
   "scripts": {
     "dev": "npm --workspace web run dev",
-    "dev:server": "npm --workspace express_server run dev",
     "build": "npm --workspace web run build",
     "lint": "npm --workspace web run lint",
     "typecheck": "npm --workspace web run typecheck"
