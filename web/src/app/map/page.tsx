@@ -1,5 +1,6 @@
 import { type Metadata } from "next";
 import { TransitMap } from "~/app/_components/TransitMap";
+import { AIAnnotationsProvider } from "~/app/_components/map/AIAnnotationsContext";
 
 export const metadata: Metadata = {
   title: "Map Editor",
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
 export default function MapPage() {
   return (
     <main className="h-screen w-screen overflow-hidden">
-      <TransitMap />
+      <AIAnnotationsProvider>
+        <TransitMap />
+      </AIAnnotationsProvider>
     </main>
   );
 }

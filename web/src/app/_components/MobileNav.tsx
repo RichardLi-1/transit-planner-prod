@@ -292,7 +292,7 @@ export function MobileNav({
           {/* Game Mode — full-width button at the bottom of the tools list */}
           <button
             onClick={() => { setSheet(null); onOpenGameMode(); }}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-3 text-sm font-semibold text-violet-700"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 py-3 text-sm font-semibold text-teal-700"
           >
             🎮 Game Mode
           </button>

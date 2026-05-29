@@ -223,6 +223,13 @@ const State = Annotation.Root({
   revisionCount: defaulted<number>(() => 0),
   commissionDecision: defaulted<"approve" | "reject" | null>(() => null),
   prScore: defaulted<number | undefined>(() => undefined),
+  // Prior-round context preserved across revisions so planners can revise
+  // independently with knowledge of what critics objected to last time.
+  priorNimby: defaulted<string>(() => ""),
+  priorPr: defaulted<string>(() => ""),
+  priorContested: defaulted<string[]>(() => []),
+  priorRouteA: defaulted<RouteResult | null>(() => null),
+  priorRouteB: defaulted<RouteResult | null>(() => null),
 });
 
 type CouncilState = typeof State.State;
@@ -325,11 +332,6 @@ function normalizeStopName(stop: string): string {
 
 function routeStops(route: RouteResult | null): string[] {
   return route?.stops.map((s) => s.name) ?? [];
-}
-
-function stopsLabel(route: RouteResult | null): string {
-  if (!route?.stops.length) return "(none)";
-  return route.stops.map((s) => `${s.name} (${s.coords[0].toFixed(4)}, ${s.coords[1].toFixed(4)})`).join("; ");
 }
 
 function clip(text: string, max = 700): string {
@@ -523,12 +525,28 @@ async function setupNode(state: CouncilState, config: LangGraphRunnableConfig) {
   return { brief, sessions: Object.fromEntries(results) as Sessions };
 }
 
+// When revisionCount > 0, surface the prior round's critic objections and the
+// planner's own last route so they revise from feedback instead of restarting.
+function revisionContext(state: CouncilState, ownPrior: RouteResult | null): string {
+  if (state.revisionCount === 0) return "";
+  return (
+    `\n\n## Revision round ${state.revisionCount}\n` +
+    `Your prior route: ${routeSummary(ownPrior)}\n` +
+    `Stops both critics objected to last round: ${state.priorContested.join(", ") || "(none)"}\n` +
+    (state.priorNimby ? `Margaret's objections:\n${clip(state.priorNimby, 350)}\n` : "") +
+    (state.priorPr ? `Devon's objections:\n${clip(state.priorPr, 350)}\n` : "") +
+    `Address these specifically: defend, cut, or replace. Do not resubmit the same route.`
+  );
+}
+
 async function plannerANode(state: CouncilState, config: LangGraphRunnableConfig) {
   const { full, route } = await streamRouteTurn(
     config,
     state,
     agent("planner_a"),
-    state.brief + "\n\nPropose 6–20 stations. For each, justify on merit: population density served, distance from nearest existing station, and cost contribution to total route length.",
+    state.brief +
+      "\n\nPropose 6–20 stations. For each, justify on merit: population density served, distance from nearest existing station, and cost contribution to total route length." +
+      revisionContext(state, state.priorRouteA),
   );
   if (route) emit(config, { type: "route_update", route, round: 1 });
   emitScoreUpdate(config, "Alex Chen", estimateRouteScore(route, state.existingLines));
@@ -540,11 +558,41 @@ async function plannerBNode(state: CouncilState, config: LangGraphRunnableConfig
     config,
     state,
     agent("planner_b"),
-    state.brief + "\n\nPropose 6–20 stations for the most cost-efficient corridor. Cut any stop where Cost Risk exceeds Ridership ROI. Prefer direct alignments and fewer, higher-ridership stops.",
+    state.brief +
+      "\n\nPropose 6–20 stations for the most cost-efficient corridor. Cut any stop where Cost Risk exceeds Ridership ROI. Prefer direct alignments and fewer, higher-ridership stops." +
+      revisionContext(state, state.priorRouteB),
   );
   if (route) emit(config, { type: "route_update", route, round: 2 });
   emitScoreUpdate(config, "Jordan Park", estimateRouteScore(route, state.existingLines));
   return { fullB: full, routeB: route };
+}
+
+// Stash the prior round into prior* fields and clear per-round state, then send
+// the graph back through plannerRouter for fresh independent proposals.
+function reviseNode(state: CouncilState, config: LangGraphRunnableConfig) {
+  const next = state.revisionCount + 1;
+  emit(config, {
+    type: "status",
+    text: `Revision ${next}: planners re-propose independently with critic feedback.`,
+  });
+  return {
+    revisionCount: next,
+    priorNimby: state.fullNimby,
+    priorPr: state.fullPr,
+    priorContested: state.contestedStops,
+    priorRouteA: state.routeA,
+    priorRouteB: state.routeB,
+    routeA: null,
+    routeB: null,
+    nimbyVotes: null,
+    prVotes: null,
+    fullNimby: "",
+    fullPr: "",
+    contestedStops: [],
+    nextPlanner: null,
+    nextCritic: null,
+    commissionDecision: null,
+  };
 }
 
 function plannerRouterNode(state: CouncilState, config: LangGraphRunnableConfig) {
@@ -635,39 +683,6 @@ function tallyNode(state: CouncilState, config: LangGraphRunnableConfig) {
   return { contestedStops: contested };
 }
 
-async function rebuttalNode(state: CouncilState, config: LangGraphRunnableConfig) {
-  const fromCommission = state.commissionDecision === "reject";
-  const allProposed = [stopsLabel(state.routeA), stopsLabel(state.routeB), stopsLabel(state.rebuttalRoute)]
-    .filter((s) => s !== "(none)")
-    .join("; ") || "(none)";
-
-  const { full, route } = await streamRouteTurn(
-    config,
-    state,
-    agent("rebuttal"),
-    state.brief +
-      `\n\n## Debate summary\n${debateSummary(state)}\n` +
-      `\n## Contested stops\n${state.contestedStops.join(", ") || "(none)"}\n` +
-      `\n## All stops proposed so far (occupied locations — 800 m exclusion zone for replacements):\n${allProposed}\n\n` +
-      (fromCommission
-        ? "The commission rejected the current route. Produce a final repair that addresses the rejection directly."
-        : "The ballot threshold forced another planning round. Defend, cut, or replace contested stops; do not make cosmetic changes."),
-  );
-
-  if (route) emit(config, { type: "route_update", route, round: 5 });
-  return {
-    fullRebuttal: full,
-    rebuttalRoute: route,
-    revisionCount: state.revisionCount + 1,
-    fullNimby: "",
-    fullPr: "",
-    nimbyVotes: null,
-    prVotes: null,
-    nextCritic: null,
-    contestedStops: [],
-  };
-}
-
 async function commissionNode(state: CouncilState, config: LangGraphRunnableConfig) {
   const ag = agent("commission");
   const currentRoute = state.rebuttalRoute ?? state.routeB ?? state.routeA;
@@ -741,8 +756,10 @@ async function commissionNode(state: CouncilState, config: LangGraphRunnableConf
   };
 }
 
-function afterTally(state: CouncilState): "rebuttal" | "commission" {
-  return state.contestedStops.length >= 2 && state.revisionCount < MAX_REVISIONS ? "rebuttal" : "commission";
+function afterTally(state: CouncilState): "revise" | "commission" {
+  // If critics jointly contested ≥2 stops and we still have revisions left,
+  // send the graph back to the planners for an independent re-proposal.
+  return state.contestedStops.length >= 2 && state.revisionCount < MAX_REVISIONS ? "revise" : "commission";
 }
 
 function afterPlannerRouter(state: CouncilState): "plannerA" | "plannerB" {
@@ -769,12 +786,10 @@ function afterPr(state: CouncilState): "nimby" | "tally" {
   return state.nimbyVotes ? "tally" : "nimby";
 }
 
-function afterRebuttal(state: CouncilState): "commission" | "criticRouter" {
-  return state.commissionDecision === "reject" ? "commission" : "criticRouter";
-}
-
-function afterCommission(state: CouncilState): "rebuttal" | typeof END {
-  return state.commissionDecision === "reject" && state.revisionCount < MAX_REVISIONS ? "rebuttal" : END;
+function afterCommission(state: CouncilState): "revise" | typeof END {
+  // Commission rejection now loops back through revise → plannerRouter so Alex
+  // and Jordan each propose a fresh revision independently.
+  return state.commissionDecision === "reject" && state.revisionCount < MAX_REVISIONS ? "revise" : END;
 }
 
 const graph = new StateGraph(State)
@@ -786,7 +801,7 @@ const graph = new StateGraph(State)
   .addNode("nimby", nimbyNode)
   .addNode("pr", prNode)
   .addNode("tally", tallyNode)
-  .addNode("rebuttal", rebuttalNode)
+  .addNode("revise", reviseNode)
   .addNode("commission", commissionNode)
   .addEdge(START, "setup")
   .addEdge("setup", "plannerRouter")
@@ -796,9 +811,9 @@ const graph = new StateGraph(State)
   .addConditionalEdges("criticRouter", afterCriticRouter, ["nimby", "pr"])
   .addConditionalEdges("nimby", afterNimby, ["pr", "tally"])
   .addConditionalEdges("pr", afterPr, ["nimby", "tally"])
-  .addConditionalEdges("tally", afterTally, ["rebuttal", "commission"])
-  .addConditionalEdges("rebuttal", afterRebuttal, ["commission", "criticRouter"])
-  .addConditionalEdges("commission", afterCommission, ["rebuttal", END])
+  .addConditionalEdges("tally", afterTally, ["revise", "commission"])
+  .addEdge("revise", "plannerRouter")
+  .addConditionalEdges("commission", afterCommission, ["revise", END])
   .compile();
 
 export async function* runCouncilGraph(input: CouncilInput): AsyncGenerator<string> {

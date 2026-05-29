@@ -2,10 +2,18 @@
 
 import { useState, useCallback } from "react";
 import { trackEvent } from "~/lib/analytics";
+import {
+  colorFromArgs,
+  labelFromTool,
+  toolNameToKind,
+} from "~/lib/ai-map-tools-client";
+import type { AIAnnotationKind } from "./map/AIAnnotationsContext";
 
 export type AnthropicMessage = {
   role: "user" | "assistant";
   content: string;
+  turnId?: string;
+  annotationIds?: string[];
 };
 
 export type AnthropicState = {
@@ -16,7 +24,19 @@ export type AnthropicState = {
   error: string | null;
 };
 
-export function useAnthropic(customSystemPrompt?: string) {
+type ToolCallHandler = (payload: {
+  name: string;
+  args: Record<string, unknown>;
+  turnId: string;
+}) => string | void;
+
+export function useAnthropic(
+  customSystemPrompt?: string,
+  options?: {
+    mapTools?: boolean;
+    onToolCall?: ToolCallHandler;
+  },
+) {
   const [state, setState] = useState<AnthropicState>({
     assistantId: null,
     threadId: null,
@@ -28,30 +48,34 @@ export function useAnthropic(customSystemPrompt?: string) {
   const sendMessageStreaming = useCallback(
     async (
       message: string,
-      options?: {
+      sendOptions?: {
         model?: string;
         maxTokens?: number;
         onChunk?: (chunk: string) => void;
       },
     ) => {
+      const turnId = crypto.randomUUID();
+      const annotationIds: string[] = [];
+
       setState((prev) => ({
         ...prev,
         isLoading: true,
         error: null,
-        messages: [...prev.messages, { role: "user", content: message }],
+        messages: [...prev.messages, { role: "user", content: message, turnId }],
       }));
 
       try {
-        // Read on every call so the user's latest choice is always respected.
         const provider = localStorage.getItem("aiProvider") ?? "anthropic";
+        const mapTools = options?.mapTools ?? false;
 
         trackEvent("AI Message Sent", {
           message_length: message.length,
           has_custom_system_prompt: Boolean(customSystemPrompt),
-          max_tokens: options?.maxTokens,
-          model: options?.model,
+          max_tokens: sendOptions?.maxTokens,
+          model: sendOptions?.model,
           streaming: true,
           provider,
+          map_tools: mapTools,
         });
 
         const response = await fetch("/api/ai/chat", {
@@ -62,9 +86,10 @@ export function useAnthropic(customSystemPrompt?: string) {
             assistantId: state.assistantId,
             threadId: state.threadId,
             systemPrompt: customSystemPrompt,
-            model: options?.model,
-            maxTokens: options?.maxTokens,
+            model: sendOptions?.model,
+            maxTokens: sendOptions?.maxTokens,
             provider,
+            mapTools,
           }),
         });
 
@@ -100,6 +125,8 @@ export function useAnthropic(customSystemPrompt?: string) {
               const parsed = JSON.parse(data) as
                 | { type: "metadata"; assistantId: string; threadId: string }
                 | { type: "content"; text: string }
+                | { type: "text"; delta: string }
+                | { type: "tool_call"; name: string; args: Record<string, unknown> }
                 | { type: "error"; error: string };
 
               if (parsed.type === "metadata") {
@@ -107,7 +134,20 @@ export function useAnthropic(customSystemPrompt?: string) {
                 newThreadId = parsed.threadId;
               } else if (parsed.type === "content") {
                 assistantMessage += parsed.text;
-                options?.onChunk?.(parsed.text);
+                sendOptions?.onChunk?.(parsed.text);
+              } else if (parsed.type === "text") {
+                assistantMessage += parsed.delta;
+                sendOptions?.onChunk?.(parsed.delta);
+              } else if (parsed.type === "tool_call") {
+                const kind = toolNameToKind(parsed.name);
+                if (kind && options?.onToolCall) {
+                  const id = options.onToolCall({
+                    name: parsed.name,
+                    args: parsed.args,
+                    turnId,
+                  });
+                  if (typeof id === "string") annotationIds.push(id);
+                }
               } else if (parsed.type === "error") {
                 throw new Error(parsed.error);
               }
@@ -124,7 +164,12 @@ export function useAnthropic(customSystemPrompt?: string) {
           threadId: newThreadId,
           messages: [
             ...prev.messages,
-            { role: "assistant", content: assistantMessage },
+            {
+              role: "assistant",
+              content: assistantMessage,
+              turnId,
+              annotationIds: annotationIds.length > 0 ? annotationIds : undefined,
+            },
           ],
           isLoading: false,
         }));
@@ -134,6 +179,7 @@ export function useAnthropic(customSystemPrompt?: string) {
           response_length: assistantMessage.length,
           streaming: true,
           provider: "anthropic",
+          annotation_count: annotationIds.length,
         });
 
         return assistantMessage;
@@ -154,13 +200,13 @@ export function useAnthropic(customSystemPrompt?: string) {
         throw error;
       }
     },
-    [state.assistantId, state.threadId, customSystemPrompt],
+    [state.assistantId, state.threadId, customSystemPrompt, options?.mapTools, options?.onToolCall],
   );
 
   const sendMessage = useCallback(
     async (
       message: string,
-      options?: {
+      sendOptions?: {
         model?: string;
         maxTokens?: number;
       },
@@ -176,8 +222,8 @@ export function useAnthropic(customSystemPrompt?: string) {
         trackEvent("AI Message Sent", {
           message_length: message.length,
           has_custom_system_prompt: Boolean(customSystemPrompt),
-          max_tokens: options?.maxTokens,
-          model: options?.model,
+          max_tokens: sendOptions?.maxTokens,
+          model: sendOptions?.model,
           streaming: false,
           provider: "anthropic",
         });
@@ -190,8 +236,8 @@ export function useAnthropic(customSystemPrompt?: string) {
             assistantId: state.assistantId,
             threadId: state.threadId,
             systemPrompt: customSystemPrompt,
-            model: options?.model,
-            maxTokens: options?.maxTokens,
+            model: sendOptions?.model,
+            maxTokens: sendOptions?.maxTokens,
           }),
         });
 
@@ -259,5 +305,22 @@ export function useAnthropic(customSystemPrompt?: string) {
     sendMessage,
     sendMessageStreaming,
     reset,
+  };
+}
+
+/** Client-safe re-exports for tool → annotation mapping. */
+export function mapToolToAnnotation(
+  name: string,
+  args: Record<string, unknown>,
+  turnId: string,
+): Omit<import("./map/AIAnnotationsContext").AIAnnotation, "id"> | null {
+  const kind = toolNameToKind(name) as AIAnnotationKind | null;
+  if (!kind) return null;
+  return {
+    kind,
+    args,
+    turnId,
+    label: labelFromTool(name, args),
+    color: colorFromArgs(args),
   };
 }

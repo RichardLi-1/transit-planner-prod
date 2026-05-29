@@ -311,7 +311,7 @@ function openReportTab(route: Route, allRoutes: Route[]): void {
     <div class="section-title">Performance Scores</div>
     <div class="score-row"><div class="score-label">Frequency</div><div class="score-track"><div class="score-fill" style="width:${score.frequency}%;background:#0ea5e9"></div></div><div class="score-num">${score.frequency}</div></div>
     <div class="score-row"><div class="score-label">Coverage</div><div class="score-track"><div class="score-fill" style="width:${score.coverage}%;background:#10b981"></div></div><div class="score-num">${score.coverage}</div></div>
-    <div class="score-row"><div class="score-label">Connectivity</div><div class="score-track"><div class="score-fill" style="width:${score.connectivity}%;background:#8b5cf6"></div></div><div class="score-num">${score.connectivity}</div></div>
+    <div class="score-row"><div class="score-label">Connectivity</div><div class="score-track"><div class="score-fill" style="width:${score.connectivity}%;background:#f43f5e"></div></div><div class="score-num">${score.connectivity}</div></div>
     <div class="score-row"><div class="score-label">Efficiency</div><div class="score-track"><div class="score-fill" style="width:${score.efficiency}%;background:#f59e0b"></div></div><div class="score-num">${score.efficiency}</div></div>
     <div style="margin-top:4px;padding-top:16px;border-top:1px solid #f1f5f9">
       <div class="score-row"><div class="score-label" style="font-weight:700;color:#0f172a">Overall</div><div class="score-track"><div class="score-fill" style="width:${score.overall}%;background:${gc}"></div></div><div class="score-num" style="color:${gc}">${score.overall}</div></div>
@@ -350,7 +350,7 @@ function openReportTab(route: Route, allRoutes: Route[]): void {
   @keyframes progress{from{width:0}to{width:100%}}
   .label{font-size:14px;color:#94a3b8;margin-bottom:20px;letter-spacing:.5px}
   .track{width:280px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden}
-  .bar{height:100%;background:linear-gradient(90deg,#6366f1,#06b6d4);border-radius:4px;animation:progress 1.1s cubic-bezier(.4,0,.2,1) forwards}
+  .bar{height:100%;background:linear-gradient(90deg,#0d9488,#06b6d4);border-radius:4px;animation:progress 1.1s cubic-bezier(.4,0,.2,1) forwards}
   .title{font-size:22px;font-weight:800;margin-bottom:8px}
 </style>
 </head>
@@ -468,7 +468,9 @@ const GRADE_BG: Record<string, string> = {
   A: "bg-emerald-50 border-emerald-200", B: "bg-sky-50 border-sky-200", C: "bg-amber-50 border-amber-200", D: "bg-orange-50 border-orange-200", F: "bg-rose-50 border-rose-200",
 };
 const BAR_COLOR: Record<string, string> = {
-  frequency: "bg-sky-500", coverage: "bg-emerald-500", connectivity: "bg-violet-500", efficiency: "bg-amber-500",
+  // 4 distinct categorical hues — connectivity uses rose (was purple) so it
+  // stays distinguishable from the teal UI accent and the emerald coverage bar.
+  frequency: "bg-sky-500", coverage: "bg-emerald-500", connectivity: "bg-rose-500", efficiency: "bg-amber-500",
 };
 const GRADE_RANK: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1 };
 
@@ -493,17 +495,13 @@ function isRouteActiveAt(route: Route, hour: number): boolean {
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
-type Tab = "stats" | "cities" | "score" | "issues" | "layers" | "vs" | "sim" | "access" | "report" | "stock" | "station" | "property" | "isochrone" | "places" | "cost" | "gaps" | "catchment" | "export" | "measure" | "elevation" | "disruption" | "ridership" | "assistant";
+type Tab = "stats" | "cities" | "score" | "issues" | "vs" | "sim" | "access" | "report" | "stock" | "station" | "property" | "places" | "cost" | "gaps" | "catchment" | "export" | "elevation" | "disruption" | "ridership" | "assistant";
 
 interface Props {
   routes: Route[];
   hiddenRoutes: Set<string>;
   selectedRoute: Route | null;
   stationPopulations: Map<string, number>;
-  showCoverageZones: boolean;
-  onToggleCoverageZones: (v: boolean) => void;
-  showServiceHeatmap: boolean;
-  onToggleServiceHeatmap: (v: boolean) => void;
   onZoomToCity: (lat: number, lng: number, zoom: number) => void;
   isochroneOrigin: [number, number] | null;
   onSetIsochroneOrigin: (coords: [number, number] | null) => void;
@@ -545,8 +543,6 @@ interface Props {
 
 export function ExperimentalPanel({
   routes, hiddenRoutes, selectedRoute, stationPopulations,
-  showCoverageZones, onToggleCoverageZones,
-  showServiceHeatmap, onToggleServiceHeatmap,
   onZoomToCity,
   isochroneOrigin, onSetIsochroneOrigin,
   isochroneMinutes, onSetIsochroneMinutes,
@@ -594,7 +590,7 @@ export function ExperimentalPanel({
   }, [simHour, simPlaying, routes]);
   const [reportRouteId, setReportRouteId] = useState("");
   const [stockType, setStockType] = useState<keyof typeof ROLLING_STOCK>("subway");
-  const [isoOriginId, setIsoOriginId] = useState("");
+  // isoOriginId state moved into IsochroneDetails (lives inline in the Layers dropdown now)
   const [stationStyle, setStationStyle] = useState<"underground" | "elevated" | "surface">("underground");
   const [propRouteId, setPropRouteId] = useState("");
   const [costRouteId, setCostRouteId] = useState("");
@@ -669,27 +665,24 @@ export function ExperimentalPanel({
   const FEATURES: { id: Tab; label: string; icon: string; desc: string; accent: string }[] = [
     { id: "stats",     label: "Network Stats",    icon: "◈", desc: "Routes, stops, headways",       accent: "text-sky-600"     },
     { id: "cities",    label: "City Coverage",    icon: "◎", desc: "Population centers served",     accent: "text-emerald-600" },
-    { id: "score",     label: "Route Score",      icon: "◆", desc: "Grade selected route",          accent: "text-violet-600"  },
+    { id: "score",     label: "Route Score",      icon: "◆", desc: "Grade selected route",          accent: "text-teal-600"  },
     { id: "issues",    label: "Network Issues",   icon: "⚠", desc: "Gaps, warnings, hubs",          accent: "text-amber-600"   },
-    { id: "layers",    label: "Map Layers",       icon: "◧", desc: "Overlays & visualisations",     accent: "text-stone-600"   },
     { id: "vs",        label: "Compare Routes",   icon: "⇌", desc: "Side-by-side scorecard",        accent: "text-sky-600"     },
-    { id: "sim",       label: "Simulation",        icon: "◷", desc: "Service by hour of day",        accent: "text-indigo-600"  },
+    { id: "sim",       label: "Simulation",        icon: "◷", desc: "Service by hour of day",        accent: "text-teal-600"  },
     { id: "access",    label: "Accessibility",    icon: "♿", desc: "Spacing & inclusive access",    accent: "text-teal-600"    },
     { id: "report",    label: "Feasibility Doc",  icon: "◉", desc: "Auto-generate analysis PDF",    accent: "text-rose-600"    },
     { id: "stock",     label: "Rolling Stock",    icon: "◈", desc: "Fleet & vehicle info",          accent: "text-stone-600"   },
-    { id: "station",   label: "Station Design",   icon: "◫", desc: "Style & property footprint",    accent: "text-violet-600"  },
+    { id: "station",   label: "Station Design",   icon: "◫", desc: "Style & property footprint",    accent: "text-teal-600"  },
     { id: "property",  label: "Land Acquisition", icon: "◰", desc: "Properties along corridor",     accent: "text-amber-600"   },
-    { id: "isochrone", label: "Travel Time Map",  icon: "◌", desc: "Walkable isochrone from stop",  accent: "text-violet-600"  },
     { id: "places",    label: "Jump to Place",    icon: "◎", desc: "Fly to city presets",           accent: "text-sky-600"     },
     { id: "cost",      label: "Cost Estimator",   icon: "◆", desc: "Capital & operating costs",     accent: "text-emerald-600" },
     { id: "gaps",      label: "Network Gaps",     icon: "◍", desc: "Unserved population centres",   accent: "text-rose-600"    },
     { id: "catchment", label: "Catchment Zones",  icon: "◎", desc: "Station radius overlay",        accent: "text-emerald-600" },
     { id: "export",    label: "Export Data",      icon: "↓",  desc: "CSV & Markdown downloads",      accent: "text-stone-600"   },
-    { id: "measure",   label: "Measure Distance", icon: "⇔", desc: "Click-to-measure on map",       accent: "text-amber-600"   },
     { id: "elevation", label: "Elevation Profile",icon: "◬", desc: "Terrain height along route",    accent: "text-teal-600"    },
     { id: "disruption",label: "Disruption Zones", icon: "◯", desc: "Noise & impact buffers",        accent: "text-rose-600"    },
-    { id: "ridership", label: "Ridership Forecast",icon:"◈", desc: "Gravity model projections",     accent: "text-violet-600"  },
-    { id: "assistant", label: "AI Assistant",      icon:"✦", desc: "Chat with your network data",   accent: "text-violet-600"  },
+    { id: "ridership", label: "Ridership Forecast",icon:"◈", desc: "Gravity model projections",     accent: "text-teal-600"  },
+    { id: "assistant", label: "AI Assistant",      icon:"✦", desc: "Chat with your network data",   accent: "text-teal-600"  },
   ];
 
   const activeFeature = tab ? FEATURES.find((f) => f.id === tab) : null;
@@ -700,7 +693,7 @@ export function ExperimentalPanel({
       <button onClick={() => { setOpen((v) => !v); if (open) setTab(null); }} className="flex w-full items-center justify-between px-4 py-3 text-left shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-stone-400 uppercase tracking-widest">Tools</span>
-          <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>
+          <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[9px] font-bold text-teal-600 uppercase tracking-wide">beta</span>
         </div>
         <svg viewBox="0 0 10 10" fill="currentColor" className={`h-2.5 w-2.5 text-stone-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}>
           <path d="M2 3l3 4 3-4H2z" />
@@ -743,11 +736,11 @@ export function ExperimentalPanel({
                 {onOpenGameMode && (
                   <button
                     onClick={onOpenGameMode}
-                    className="text-left rounded-xl border border-violet-100 bg-violet-50 px-2.5 py-2.5 hover:border-violet-200 hover:bg-violet-50/80 transition-all group"
+                    className="text-left rounded-xl border border-teal-100 bg-teal-50 px-2.5 py-2.5 hover:border-teal-200 hover:bg-teal-50/80 transition-all group"
                   >
                     <span className="text-base leading-none">🎮</span>
-                    <p className="mt-1 text-[11px] font-semibold text-violet-700 leading-tight">Game Mode</p>
-                    <p className="mt-0.5 text-[9px] text-violet-400 leading-tight">Interactive planning game</p>
+                    <p className="mt-1 text-[11px] font-semibold text-teal-700 leading-tight">Game Mode</p>
+                    <p className="mt-0.5 text-[9px] text-teal-400 leading-tight">Interactive planning game</p>
                   </button>
                 )}
               </div>
@@ -906,7 +899,7 @@ export function ExperimentalPanel({
                         <div key={h.name} className="rounded-lg bg-stone-50 border border-stone-100 px-2.5 py-2">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-[11px] font-semibold text-stone-700 truncate flex-1">{h.name}</p>
-                            <Pill color="bg-violet-100 text-violet-700">{h.routeCount} lines</Pill>
+                            <Pill color="bg-teal-100 text-teal-700">{h.routeCount} lines</Pill>
                           </div>
                           <p className="text-[10px] text-stone-400 mt-0.5 truncate">{h.routeNames.slice(0, 3).join(" · ")}</p>
                         </div>
@@ -932,42 +925,7 @@ export function ExperimentalPanel({
               </div>
             )}
 
-            {/* ── Layers ── */}
-            {tab === "layers" && (
-              <div className="space-y-2">
-                <ToggleRow label="Coverage Zones" sub="500 m radius per stop" on={showCoverageZones} onToggle={() => onToggleCoverageZones(!showCoverageZones)} activeColor="bg-sky-500" />
-                <ToggleRow label="Service Heatmap" sub="Density weighted by mode" on={showServiceHeatmap} onToggle={() => onToggleServiceHeatmap(!showServiceHeatmap)} activeColor="bg-orange-500" />
-                <div className="border-t border-stone-100 pt-2">
-                  <SectionLabel>Isochrone</SectionLabel>
-                  <div className="space-y-1.5">
-                    <select
-                      value={isoOriginId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setIsoOriginId(id);
-                        if (!id) { onSetIsochroneOrigin(null); return; }
-                        const [routeId, ...rest] = id.split("::");
-                        const stopName = rest.join("::");
-                        const stop = routes.find((r) => r.id === routeId)?.stops.find((s) => s.name === stopName);
-                        onSetIsochroneOrigin(stop ? stop.coords : null);
-                      }}
-                      className="w-full rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs text-stone-700 outline-none focus:border-stone-400 bg-white"
-                    >
-                      <option value="">— origin stop —</option>
-                      {routes.flatMap((r) => r.stops.map((s) => ({ id: `${r.id}::${s.name}`, label: `${s.name} (${r.shortName})` }))).slice(0, 60).map((o) => (
-                        <option key={o.id} value={o.id}>{o.label}</option>
-                      ))}
-                    </select>
-                    <div className="flex items-center gap-2">
-                      <input type="range" min={10} max={60} step={5} value={isochroneMinutes} onChange={(e) => onSetIsochroneMinutes(Number(e.target.value))} className="flex-1 accent-violet-500" />
-                      <span className="text-[11px] font-semibold text-stone-700 w-10 shrink-0">{isochroneMinutes} min</span>
-                    </div>
-                    <ToggleRow label="Show travel time" sub={`Walking isochrone · ${isochroneMinutes} min`} on={!!isochroneOrigin} onToggle={() => onSetIsochroneOrigin(isochroneOrigin ? null : null)} activeColor="bg-violet-500" />
-                    {!isoOriginId && <p className="text-[9px] text-stone-400 text-center">Select an origin stop above</p>}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Layers / Isochrone moved to the top-toolbar Layers dropdown. */}
 
             {/* ── vs. ── */}
             {tab === "vs" && (
@@ -1029,7 +987,7 @@ export function ExperimentalPanel({
                       <span className="text-xs font-bold text-stone-700">{hourLabel(simHour)}</span>
                       <button
                         onClick={() => setSimPlaying((v) => !v)}
-                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${simPlaying ? "bg-violet-500 text-white" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
+                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${simPlaying ? "bg-teal-500 text-white" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
                         title={simPlaying ? "Pause" : "Play"}
                       >
                         {simPlaying ? (
@@ -1040,14 +998,14 @@ export function ExperimentalPanel({
                       </button>
                     </div>
                   </div>
-                  <input type="range" min={0} max={23} step={1} value={simHour} onChange={(e) => { setSimPlaying(false); setSimHour(Number(e.target.value)); }} className="w-full accent-violet-500" />
+                  <input type="range" min={0} max={23} step={1} value={simHour} onChange={(e) => { setSimPlaying(false); setSimHour(Number(e.target.value)); }} className="w-full accent-teal-500" />
                   {/* 24hr bar chart */}
                   <div className="flex items-end gap-px mt-2 h-8">
                     {simBars.map((count, h) => (
                       <div
                         key={h}
                         title={`${hourLabel(h)}: ${count} routes`}
-                        className={`flex-1 rounded-sm transition-colors ${h === simHour ? "bg-violet-500" : "bg-stone-200 hover:bg-stone-300"}`}
+                        className={`flex-1 rounded-sm transition-colors ${h === simHour ? "bg-teal-500" : "bg-stone-200 hover:bg-stone-300"}`}
                         style={{ height: `${Math.max(8, (count / maxBar) * 100)}%` }}
                       />
                     ))}
@@ -1275,7 +1233,7 @@ export function ExperimentalPanel({
                               <p className="text-[10px] font-semibold text-stone-700 truncate">{s.name}</p>
                               <p className="text-[9px] text-stone-400">{landM2.toLocaleString()} m² · {isTerminus ? "terminus" : isPortal ? "portal" : "station"}</p>
                             </div>
-                            <Pill color={isTerminus ? "bg-violet-100 text-violet-700" : isPortal ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-500"}>
+                            <Pill color={isTerminus ? "bg-teal-100 text-teal-700" : isPortal ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-500"}>
                               {isTerminus ? "terminus" : isPortal ? "portal" : "station"}
                             </Pill>
                           </div>
@@ -1288,92 +1246,7 @@ export function ExperimentalPanel({
               </div>
             )}
 
-            {/* ── Isochrone ── */}
-            {tab === "isochrone" && (
-              <div className="space-y-2">
-                <div>
-                  <SectionLabel>Origin stop</SectionLabel>
-                  <button
-                    onClick={() => { onStartPickIsochroneOrigin?.(); }}
-                    className={`mb-2 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${pickingIsochroneOrigin ? "border-violet-400 bg-violet-50 text-violet-700" : "border-stone-200 bg-stone-50 text-stone-600 hover:border-stone-300"}`}
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="8" cy="8" r="2.5" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4" />
-                    </svg>
-                    {pickingIsochroneOrigin ? "Click a point on the map…" : "Pick point on map"}
-                  </button>
-                  <select
-                    value={isoOriginId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setIsoOriginId(id);
-                      if (!id) { onSetIsochroneOrigin(null); return; }
-                      const [routeId, ...rest] = id.split("::");
-                      const stopName = rest.join("::");
-                      const stop = routes.find((r) => r.id === routeId)?.stops.find((s) => s.name === stopName);
-                      onSetIsochroneOrigin(stop ? stop.coords : null);
-                    }}
-                    className="w-full rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs text-stone-700 outline-none focus:border-stone-400 bg-white"
-                  >
-                    <option value="">— select origin —</option>
-                    {routes.flatMap((r) => r.stops.map((s) => ({ id: `${r.id}::${s.name}`, label: `${s.name} (${r.shortName})` }))).slice(0, 80).map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <SectionLabel>Travel mode</SectionLabel>
-                  <div className="flex gap-1 mb-2">
-                    {(["walking", "cycling", "driving"] as const).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => onSetIsoMode?.(m)}
-                        className={`flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-medium capitalize transition-colors ${isoMode === m ? "border-violet-400 bg-violet-50 text-violet-700" : "border-stone-200 text-stone-500 hover:border-stone-300"}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <SectionLabel>Max travel time</SectionLabel>
-                    <span className="text-[10px] font-semibold text-stone-600">{isochroneMinutes} min</span>
-                  </div>
-                  <input type="range" min={10} max={60} step={5} value={isochroneMinutes} onChange={(e) => onSetIsochroneMinutes(Number(e.target.value))} className="w-full accent-violet-500" />
-                  <div className="flex justify-between text-[9px] text-stone-300 mt-0.5">
-                    <span>10</span><span>20</span><span>30</span><span>45</span><span>60 min</span>
-                  </div>
-                </div>
-                {/* legend */}
-                <div className="space-y-1">
-                  {([15, 30, 45, 60] as const).filter((m) => m <= isochroneMinutes).map((m) => {
-                    const colors: Record<number, string> = { 15: "#10b981", 30: "#f59e0b", 45: "#ef4444", 60: "#7c3aed" };
-                    return (
-                      <div key={m} className="flex items-center gap-2 rounded-lg bg-stone-50 px-2.5 py-1.5">
-                        <div className="h-3 w-3 rounded-full border-2 shrink-0" style={{ borderColor: colors[m] }} />
-                        <span className="text-[11px] text-stone-600">{m} min walking</span>
-                        <span className="ml-auto text-[9px] text-stone-400">~{Math.round(m * 80)} m</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {!isoOriginId ? (
-                  <p className="text-[10px] text-stone-400 text-center py-2">Select an origin stop to show isochrone</p>
-                ) : (
-                  <div className={`rounded-lg border px-2.5 py-2 ${isochroneOrigin ? "bg-violet-50 border-violet-100" : "bg-stone-50 border-stone-100"}`}>
-                    <p className={`text-[10px] font-semibold ${isochroneOrigin ? "text-violet-700" : "text-stone-500"}`}>
-                      {isochroneOrigin ? `Showing ${isochroneMinutes} min walking radius` : "No stop coords found"}
-                    </p>
-                    {isochroneOrigin && (
-                      <button onClick={() => { setIsoOriginId(""); onSetIsochroneOrigin(null); }} className="mt-1 text-[9px] text-violet-400 hover:text-violet-600">
-                        Clear →
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Isochrone moved to the top-toolbar Layers dropdown (inline configurator). */}
 
             {/* ── Places ── */}
             {tab === "places" && (
@@ -1412,14 +1285,14 @@ export function ExperimentalPanel({
                       {([["Underground %", tunnelPct, (v: number) => setTunnelPct(Math.min(v, 100 - elevatedPct))], ["Elevated %", elevatedPct, (v: number) => setElevatedPct(Math.min(v, 100 - tunnelPct))]] as [string, number, (v: number) => void][]).map(([label, val, set]) => (
                         <div key={label}>
                           <div className="flex justify-between text-[10px] text-stone-500 mb-0.5"><span>{label}</span><span className="font-semibold">{val}%</span></div>
-                          <input type="range" min={0} max={100} value={val} onChange={(e) => set(Number(e.target.value))} className="w-full accent-violet-500" />
+                          <input type="range" min={0} max={100} value={val} onChange={(e) => set(Number(e.target.value))} className="w-full accent-teal-500" />
                         </div>
                       ))}
                       <div className="flex justify-between text-[10px] text-stone-400"><span>At-grade / surface</span><span>{costBreakdown.surfacePct}%</span></div>
                     </div>
                     <div className="rounded-lg bg-stone-50 px-2.5 py-2 space-y-1">
                       <div className="flex justify-between text-xs"><span className="text-stone-500">Route length</span><span className="font-semibold text-stone-800">{costBreakdown.totalKm.toFixed(1)} km</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-stone-500">Capital cost</span><span className="font-bold text-violet-700">${costBreakdown.capitalM >= 1000 ? `${(costBreakdown.capitalM / 1000).toFixed(2)}B` : `${costBreakdown.capitalM.toFixed(0)}M`}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-stone-500">Capital cost</span><span className="font-bold text-teal-700">${costBreakdown.capitalM >= 1000 ? `${(costBreakdown.capitalM / 1000).toFixed(2)}B` : `${costBreakdown.capitalM.toFixed(0)}M`}</span></div>
                       <div className="flex justify-between text-xs"><span className="text-stone-500">Annual operating</span><span className="font-semibold text-stone-800">~${costBreakdown.operatingM.toFixed(1)}M/yr</span></div>
                     </div>
                   </>
@@ -1454,7 +1327,11 @@ export function ExperimentalPanel({
             {/* ── Catchment ── */}
             {tab === "catchment" && (
               <div className="space-y-2">
-                <ToggleRow label="Show catchment circles" sub="Overlay radius around each station" on={showCatchment} onToggle={() => onToggleCatchment(!showCatchment)} activeColor="bg-emerald-500" />
+                {/* Toggle moved to top-toolbar Layers dropdown. This panel keeps the advanced radius config only. */}
+                <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[11px] ${showCatchment ? "bg-emerald-50 text-emerald-700" : "bg-stone-50 text-stone-500"}`}>
+                  <span>{showCatchment ? "Catchment is ON" : "Catchment is OFF"}</span>
+                  <span className="text-[10px] text-stone-400">Toggle in Layers ↑</span>
+                </div>
                 {showCatchment && (
                   <>
                     <SectionLabel>Catchment radius</SectionLabel>
@@ -1577,26 +1454,7 @@ export function ExperimentalPanel({
               </div>
             )}
 
-            {/* ── Measure ── */}
-            {tab === "measure" && (
-              <div className="space-y-2">
-                <ToggleRow label="Click-to-measure" sub="Click two points on the map" on={measureMode} onToggle={() => onToggleMeasureMode(!measureMode)} activeColor="bg-amber-500" />
-                {measureMode && (
-                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-700">
-                    Click two points on the map to measure crow-flies distance
-                  </div>
-                )}
-                {measureDistanceKm !== null ? (
-                  <div className="rounded-lg bg-stone-50 border border-stone-200 px-2.5 py-3 text-center space-y-0.5">
-                    <p className="text-[10px] text-stone-400">Crow-flies distance</p>
-                    <p className="text-2xl font-bold text-stone-900">{imperial ? (measureDistanceKm * 0.621371).toFixed(2) : measureDistanceKm.toFixed(2)} <span className="text-sm font-normal text-stone-400">{imperial ? "mi" : "km"}</span></p>
-                    <p className="text-[10px] text-stone-400">{imperial ? `${(measureDistanceKm * 5280).toFixed(0)} ft` : `${(measureDistanceKm * 1000).toFixed(0)} m`} · {imperial ? `${measureDistanceKm.toFixed(2)} km` : `${(measureDistanceKm * 0.621371).toFixed(2)} mi`}</p>
-                  </div>
-                ) : !measureMode ? (
-                  <p className="text-[11px] text-stone-400 text-center py-2">Toggle measure mode, then click two points</p>
-                ) : null}
-              </div>
-            )}
+            {/* Measure moved to the top-toolbar Layers dropdown (Tools section). */}
 
             {/* ── Elevation ── */}
             {tab === "elevation" && (
@@ -1642,7 +1500,11 @@ export function ExperimentalPanel({
             {/* ── Disruption ── */}
             {tab === "disruption" && (
               <div className="space-y-2">
-                <ToggleRow label="Disruption buffer" sub="Noise & impact zone overlay" on={showDisruption} onToggle={() => onToggleDisruption(!showDisruption)} activeColor="bg-rose-500" />
+                {/* Toggle moved to top-toolbar Layers dropdown. This panel keeps the advanced radius/route config only. */}
+                <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[11px] ${showDisruption ? "bg-rose-50 text-rose-700" : "bg-stone-50 text-stone-500"}`}>
+                  <span>{showDisruption ? "Disruption is ON" : "Disruption is OFF"}</span>
+                  <span className="text-[10px] text-stone-400">Toggle in Layers ↑</span>
+                </div>
                 {showDisruption && (
                   <>
                     <div>
@@ -1707,7 +1569,7 @@ export function ExperimentalPanel({
                           <span className="text-stone-800 font-semibold shrink-0">{(daily / 1000).toFixed(1)}k/day</span>
                         </div>
                         <div className="h-1 rounded-full bg-stone-100 overflow-hidden">
-                          <div className="h-full rounded-full bg-violet-400" style={{ width: `${(daily / maxD) * 100}%` }} />
+                          <div className="h-full rounded-full bg-teal-400" style={{ width: `${(daily / maxD) * 100}%` }} />
                         </div>
                       </div>
                     );

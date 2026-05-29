@@ -1,7 +1,14 @@
 import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { AIProvider, ChatMessage, ToolDefinition, ToolStreamChunk } from "./ai-provider";
+import type {
+  AIProvider,
+  ChatMessage,
+  MapToolStreamChunk,
+  ToolDefinition,
+  ToolStreamChunk,
+} from "./ai-provider";
+import { streamMapToolResponse } from "./ai-map-stream";
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a transit route planning assistant for Toronto.
 
@@ -204,6 +211,54 @@ export function createAnthropicProvider(): AIProvider {
         messages: [...nextMessages, { role: "assistant", content: text }],
       });
       return text;
+    },
+
+    async *streamMessageWithMapTools(
+      threadId,
+      content,
+      model = "claude-haiku-4-5-20251001",
+      maxTokens = 900,
+    ): AsyncGenerator<MapToolStreamChunk> {
+      const thread = getThread(threadId);
+      const assistant = getAssistant(thread.assistantId);
+      const history = thread.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const gen = streamMapToolResponse(client, {
+        system: assistant.systemPrompt,
+        history,
+        userMessage: content,
+        model,
+        maxTokens,
+      });
+
+      let result = await gen.next();
+      while (!result.done) {
+        yield result.value;
+        result = await gen.next();
+      }
+
+      const { assistantText, history: nextHistory } = result.value;
+      const stored = nextHistory
+        .filter((m): m is { role: "user" | "assistant"; content: string } =>
+          typeof m.content === "string" && (m.role === "user" || m.role === "assistant"),
+        )
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      if (stored.length > 0) {
+        threadStore.set(threadId, { ...thread, messages: stored });
+      } else if (assistantText) {
+        threadStore.set(threadId, {
+          ...thread,
+          messages: [
+            ...thread.messages,
+            { role: "user", content },
+            { role: "assistant", content: assistantText },
+          ],
+        });
+      }
     },
 
     async *streamDirect(system, messages: ChatMessage[], model = "claude-haiku-4-5-20251001", maxTokens = 1024) {
