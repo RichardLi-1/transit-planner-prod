@@ -180,6 +180,38 @@ export function sliceShapeBetween(from: Coord, to: Coord, shape: Coord[]): Coord
   return p0 <= p1 ? slice : [...slice].reverse();
 }
 
+/**
+ * Returns a GeoJSON FeatureCollection with one point per interchange station —
+ * a stop name that appears on two or more non-bus routes. The point is placed
+ * at the centroid of all matching stop coordinates so it sits between the
+ * slightly-offset per-route dots and renders as a single unified marker.
+ */
+export function transferStationsToGeoJSON(routes: Route[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  const byName = new Map<string, { coords: [number, number][]; colors: string[] }>();
+  for (const route of routes) {
+    if (route.type === "bus") continue;
+    for (const stop of route.stops) {
+      const entry = byName.get(stop.name) ?? { coords: [], colors: [] };
+      if (!byName.has(stop.name)) byName.set(stop.name, entry);
+      entry.coords.push(stop.coords);
+      entry.colors.push(route.color);
+    }
+  }
+
+  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+  for (const [name, { coords, colors }] of byName) {
+    if (coords.length < 2) continue;
+    const lon = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+    const lat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+    features.push({
+      type: "Feature",
+      properties: { name, primaryColor: colors[0] ?? "#888888", routeCount: coords.length },
+      geometry: { type: "Point", coordinates: [lon, lat] },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
 export function portalsToGeoJSON(route: Route): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: "FeatureCollection",

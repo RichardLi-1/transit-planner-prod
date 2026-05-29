@@ -12,7 +12,7 @@ import {
   type GeneratedRoute,
   type Route,
 } from "~/app/map/transit-data";
-import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape, sliceShapeBetween } from "./map/geo";
+import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape, sliceShapeBetween, transferStationsToGeoJSON } from "./map/geo";
 import { NeighbourhoodPanel } from "./map/NeighbourhoodPanel";
 import { RoutePanel } from "./map/RoutePanel";
 import { GeneratedRoutePanel } from "./map/GeneratedRoutePanel";
@@ -589,6 +589,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           }
         }
       }
+      // Keep the interchange marker source in sync when stop coordinates change
+      const xferSrc = map.getSource("transfer-stations-src") as mapboxgl.GeoJSONSource | undefined;
+      if (xferSrc) xferSrc.setData(transferStationsToGeoJSON(routes));
     }
   }, [routes]);
 
@@ -3137,6 +3140,57 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       map.on("mouseenter", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = ""; });
     });
+
+    // ── Interchange / transfer-station markers ────────────────────────────────
+    // One unified marker per stop name that appears on 2+ non-bus routes, rendered
+    // above all per-route dots so same-name stations appear as a single point.
+    const XFER_SRC  = "transfer-stations-src";
+    const XFER_RING = "transfer-stations-ring";
+    const XFER_DOT  = "transfer-stations-dot";
+    const xferData  = transferStationsToGeoJSON(routes);
+    if (map.getSource(XFER_SRC)) {
+      (map.getSource(XFER_SRC) as mapboxgl.GeoJSONSource).setData(xferData);
+      // Move layers to top so they render above any newly added route layers
+      if (map.getLayer(XFER_RING)) map.moveLayer(XFER_RING);
+      if (map.getLayer(XFER_DOT))  map.moveLayer(XFER_DOT);
+    } else {
+      map.addSource(XFER_SRC, { type: "geojson", data: xferData });
+      map.addLayer({
+        id: XFER_RING,
+        type: "circle",
+        source: XFER_SRC,
+        minzoom: 9,
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#ffffff",
+          "circle-stroke-color": "#444444",
+          "circle-stroke-width": 2,
+        },
+      });
+      map.addLayer({
+        id: XFER_DOT,
+        type: "circle",
+        source: XFER_SRC,
+        minzoom: 9,
+        paint: {
+          "circle-radius": 3,
+          "circle-color": "#444444",
+        },
+      });
+      map.on("click", XFER_RING, (e) => {
+        if (didDragStopRef.current) { didDragStopRef.current = false; return; }
+        const name = e.features?.[0]?.properties?.name as string | undefined;
+        if (!name) return;
+        e.originalEvent.stopPropagation();
+        const matchRoute = routesRef.current.find((r) => r.stops.some((s) => s.name === name));
+        if (!matchRoute) return;
+        setStationPopup({ name, routeId: matchRoute.id, x: e.point.x, y: e.point.y, coords: [e.lngLat.lng, e.lngLat.lat] });
+        setSelectedRouteId(matchRoute.id);
+        setSelectedStop(name);
+      });
+      map.on("mouseenter", XFER_RING, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", XFER_RING, () => { map.getCanvas().style.cursor = ""; });
+    }
   }, [routes, mapLoaded]);
 
   // ── drag-to-reposition stops while in edit mode
