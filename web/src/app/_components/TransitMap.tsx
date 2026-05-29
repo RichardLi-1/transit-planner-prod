@@ -20,6 +20,7 @@ import { StationPopup } from "./map/StationPopup";
 import { NewLineModal } from "./map/NewLineModal";
 import { ExperimentalPanel } from "./map/ExperimentalPanel";
 import { LayersDropdown, type OverlaySpec, type ActionRow } from "./map/LayersDropdown";
+import { OVERLAY_ICONS } from "./map/overlay-icons";
 import { IsochroneDetails } from "./map/IsochroneDetails";
 import { AIChatPanel } from "./map/AIChatPanel";
 import {
@@ -4221,7 +4222,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {/* Top-center toolbar (desktop only) */}
       <div className="pointer-events-none hidden md:flex absolute top-5 left-0 right-0 justify-center gap-2">
-        {/* Layers dropdown — ALL map overlays live here. Pinned ones render as quick-toggle pills before the dropdown button. */}
+        {/* Layers dropdown — ALL map overlays live here. Pinned ones hang as a vertical quick-toggle stack below the button. */}
         <LayersDropdown
           overlays={(
             [
@@ -4287,7 +4288,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                 onToggle: () => setAiAnnotationsVisible(!aiAnnotationsVisible),
               },
             ] satisfies OverlaySpec[]
-          )}
+          ).map((o) => ({ ...o, icon: OVERLAY_ICONS[o.id] }))}
           pinned={pinnedLayers}
           onTogglePin={(id) => setPinnedLayers((prev) => {
             // 📖 Learn: build a new Set so React detects the state change.

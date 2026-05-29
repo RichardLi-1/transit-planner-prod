@@ -18,6 +18,12 @@ export interface OverlaySpec {
   /** Indicator dot color when active (any CSS color). */
   color: string;
   /**
+   * Optional glyph shown on the pinned toolbar chip in place of the colour
+   * dot. Tinted by `color` when on / grey when off (SVG must use
+   * currentColor). Falls back to the colour dot when omitted.
+   */
+  icon?: ReactNode;
+  /**
    * Optional inline-expandable controls (e.g. sliders, pickers) shown ONLY
    * when the overlay is on. Used for Isochrone, which is meaningless without
    * an origin/duration. Other overlays keep their config in ExperimentalPanel.
@@ -79,27 +85,10 @@ export function LayersDropdown({ overlays, pinned, onTogglePin, actions = [] }: 
   const activeCount = overlays.filter((o) => o.on).length;
 
   return (
-    <>
-      {/* Pinned quick-toggles render inline with the rest of the toolbar */}
-      {pinnedOverlays.map((o) => (
-        <button
-          key={o.id}
-          onClick={o.onToggle}
-          className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
-            o.on ? "text-stone-700" : "text-stone-400"
-          }`}
-        >
-          {o.loading ? (
-            <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" />
-          ) : (
-            <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: o.on ? o.color : "#d1d5db" }} />
-          )}
-          {o.label}
-        </button>
-      ))}
-
-      {/* Layers dropdown */}
-      <div ref={containerRef} className="relative">
+    // Layers dropdown. Pinned overlays no longer sit inline in the toolbar —
+    // they hang as a vertical stack BELOW this button (see below), so the top
+    // toolbar stays uncluttered.
+    <div ref={containerRef} className="relative">
         <button
           onClick={() => setOpen((v) => !v)}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border border-[#D7D7D7] bg-white px-5 text-base font-normal shadow-sm transition-all ${
@@ -123,6 +112,46 @@ export function LayersDropdown({ overlays, pinned, onTogglePin, actions = [] }: 
             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.06l3.71-3.83a.75.75 0 1 1 1.08 1.04l-4.25 4.39a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
           </svg>
         </button>
+
+        {/* Pinned quick-toggles hang below the Layers button as a row of fixed
+            36×36 SQUARE icon buttons (left-aligned to the button). The icons
+            never move — the name appears as a floating tooltip on hover.
+            Keeping the squares stationary means moving between adjacent chips
+            is a short, stable motion (no layout reflow shoving the next chip
+            away). The tooltip is pointer-events-none so it never captures the
+            cursor or blocks the chip behind it. Hidden while the dropdown is
+            open — the panel lists them anyway. */}
+        {!open && pinnedOverlays.length > 0 && (
+          <div className="pointer-events-none absolute top-full left-0 mt-1.5 flex items-center justify-start gap-1.5">
+            {pinnedOverlays.map((o) => (
+              <button
+                key={o.id}
+                onClick={o.onToggle}
+                title={o.label}
+                className={`group pointer-events-auto relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#D7D7D7] bg-white shadow-sm transition-colors ${
+                  o.on ? "text-stone-700" : "text-stone-400"
+                }`}
+              >
+                {o.loading ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" />
+                ) : o.icon ? (
+                  // Tint the glyph via `color` — the SVG paints with currentColor.
+                  <span className="flex h-5 w-5 items-center justify-center" style={{ color: o.on ? o.color : "#9ca3af" }}>
+                    {o.icon}
+                  </span>
+                ) : (
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: o.on ? o.color : "#d1d5db" }} />
+                )}
+                {/* Floating name tooltip: overlay to the right of the icon. It
+                    slides in + fades (transform/opacity only — no layout shift)
+                    and sits above neighbouring chips (z-20). */}
+                <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-1.5 -translate-x-1 -translate-y-1/2 whitespace-nowrap rounded-lg border border-[#D7D7D7] bg-white px-2.5 py-1 text-sm text-stone-700 opacity-0 shadow-sm transition duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100">
+                  {o.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {open && (
           <div className="pointer-events-auto absolute top-full right-0 mt-2 w-72 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
@@ -217,6 +246,5 @@ export function LayersDropdown({ overlays, pinned, onTogglePin, actions = [] }: 
           </div>
         )}
       </div>
-    </>
   );
 }
