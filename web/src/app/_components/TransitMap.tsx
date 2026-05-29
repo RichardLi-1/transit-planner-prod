@@ -3687,6 +3687,48 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       map.on("mouseenter", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = ""; });
     });
+
+    // ── Re-stack route layers relative to the basemap + each other ──────────
+    // Layers are inserted per-route in a loop, and Mapbox draws strictly in
+    // insertion order (no layer groups). Two problems fell out of that:
+    //   1. The dark station "pills" in the basemap (e.g. "Union (Subway)") were
+    //      being painted OVER by our coloured route lines, because the lines are
+    //      added on top of the whole basemap (no beforeId). Fix: drop the line
+    //      layers BELOW the basemap's label layers so the pills sit on top.
+    //   2. A route added later painted its line over an EARLIER route's dots,
+    //      so crossing lines hid stop dots/labels. Fix: lift our markers to top.
+    // 📖 Learn: moveLayer(id, beforeId) puts `id` directly below `beforeId`;
+    //   moveLayer(id) with no beforeId lifts it to the very top.
+    //   https://docs.mapbox.com/mapbox-gl-js/api/map/#map#movelayer
+
+    // The basemap's lowest text layer — inserting below it = below ALL basemap
+    // labels (street names, place names, and the transit-station pills).
+    const firstLabelLayer = map
+      .getStyle()
+      ?.layers?.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown>)?.["text-field"])?.id;
+
+    if (firstLabelLayer && map.getLayer(firstLabelLayer)) {
+      // Build the desired bottom→top stack for ALL of our route layers, then
+      // move each one to sit directly below the basemap labels. Because each
+      // moveLayer(id, firstLabelLayer) call drops `id` just under that label
+      // layer (above whatever we moved previously), calling them in this order
+      // reproduces the stack exactly — and ALL of it ends up beneath the
+      // basemap pills, so nothing of ours (lines OR dots) covers a pill.
+      //   grouped by type across routes so no route's line hides another
+      //   route's dots: every line sits below every dot.
+      const lineIds = routes.flatMap((r) => [`route-shadow-${r.id}`, `route-outline-${r.id}`, `route-line-${r.id}`, `route-shimmer-${r.id}`, `underground-line-${r.id}`]);
+      const dotIds = routes.flatMap((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`]);
+      const labelIds = routes.map((r) => `stops-label-${r.id}`);
+      [...lineIds, ...dotIds, ...labelIds].forEach((id) => {
+        if (map.getLayer(id)) map.moveLayer(id, firstLabelLayer);
+      });
+    } else {
+      // Fallback (basemap label layer not found): can't sit below the pills,
+      // so at least keep dots/labels above lines to fix the crossing-line bug.
+      const raise = (id: string) => { if (map.getLayer(id)) map.moveLayer(id); };
+      routes.forEach((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`].forEach(raise));
+      routes.forEach((r) => raise(`stops-label-${r.id}`));
+    }
   }, [routes, mapLoaded]);
 
   // ── drag-to-reposition stops while in edit mode
