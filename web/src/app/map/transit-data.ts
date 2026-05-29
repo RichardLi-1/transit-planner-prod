@@ -227,7 +227,7 @@ export const ROUTES: Route[] = [
       [-79.4048, 43.6671], // Spadina
       [-79.3988, 43.6684], // St George
       [-79.3909, 43.6700], // Bay
-      [-79.3864, 43.6710], // Bloor–Yonge
+      [-79.3856, 43.6706], // Bloor–Yonge
       [-79.3762, 43.6721], // Sherbourne
       [-79.3689, 43.6738], // Castle Frank
       [-79.3588, 43.6767], // Broadview
