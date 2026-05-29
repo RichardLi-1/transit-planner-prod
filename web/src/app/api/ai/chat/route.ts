@@ -14,6 +14,8 @@ export async function POST(request: NextRequest) {
       model?: string;
       maxTokens?: number;
       provider?: string;
+      /** When true, use map annotation tools (Anthropic only). */
+      mapTools?: boolean;
     };
 
     const {
@@ -24,6 +26,7 @@ export async function POST(request: NextRequest) {
       model = "claude-haiku-4-5-20251001",
       maxTokens = 600,
       provider,
+      mapTools = false,
     } = body;
 
     void trackChatMessage({ message, model });
@@ -35,14 +38,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const aiProvider = getProvider(mapTools ? "anthropic" : provider);
+
     let assistantId = providedAssistantId;
     if (!assistantId) {
-      assistantId = await getProvider(provider).createAssistant("Transit Planner", systemPrompt);
+      assistantId = await aiProvider.createAssistant("Transit Planner", systemPrompt);
     }
 
     let threadId = providedThreadId;
     if (!threadId) {
-      threadId = await getProvider(provider).createThread(assistantId);
+      threadId = await aiProvider.createThread(assistantId);
     }
 
     const encoder = new TextEncoder();
@@ -55,17 +60,46 @@ export async function POST(request: NextRequest) {
             ),
           );
 
-          for await (const chunk of getProvider(provider).streamMessage(
-            threadId,
-            message,
-            model,
-            maxTokens,
-          )) {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "content", text: chunk })}\n\n`,
-              ),
-            );
+          const ai = aiProvider;
+
+          if (mapTools && ai.streamMessageWithMapTools) {
+            for await (const chunk of ai.streamMessageWithMapTools(
+              threadId,
+              message,
+              model,
+              maxTokens,
+            )) {
+              if (chunk.type === "text") {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "text", delta: chunk.delta })}\n\n`,
+                  ),
+                );
+              } else if (chunk.type === "tool_call") {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "tool_call",
+                      name: chunk.name,
+                      args: chunk.args,
+                    })}\n\n`,
+                  ),
+                );
+              }
+            }
+          } else {
+            for await (const chunk of ai.streamMessage(
+              threadId,
+              message,
+              model,
+              maxTokens,
+            )) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: "content", text: chunk })}\n\n`,
+                ),
+              );
+            }
           }
 
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));

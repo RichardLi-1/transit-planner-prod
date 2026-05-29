@@ -299,14 +299,14 @@ const AGENT_LABEL: Record<string, string> = {
 
 function OrchestratorBadge({ directive, iterationInfo }: { directive: OrchestratorDirective; iterationInfo: { round: number; converged: boolean; reason: string } | null }) {
   return (
-    <div className="mx-4 mb-2 rounded-xl px-3 py-2 text-[11px]" style={{ background: "#f5f0ff", border: "1px solid #7c3aed30" }}>
+    <div className="mx-4 mb-2 rounded-xl px-3 py-2 text-[11px]" style={{ background: "#f0fdfa", border: "1px solid #14b8a630" }}>
       <div className="flex items-center gap-2 mb-1">
-        <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-violet-500" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-teal-500" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="6" cy="6" r="5"/><path d="M6 4v2l1.5 1.5"/>
         </svg>
-        <span className="font-semibold text-violet-700">Orchestrator</span>
+        <span className="font-semibold text-teal-700">Orchestrator</span>
         {iterationInfo && (
-          <span className="ml-auto text-[10px] text-violet-400">
+          <span className="ml-auto text-[10px] text-teal-400">
             {iterationInfo.converged ? "✓ done" : `round ${iterationInfo.round + 1}/3`}
           </span>
         )}
@@ -314,7 +314,7 @@ function OrchestratorBadge({ directive, iterationInfo }: { directive: Orchestrat
       <p className="text-stone-500 mb-1.5">{directive.reasoning}</p>
       <div className="flex flex-wrap gap-1">
         {directive.activeAgents.map((a) => (
-          <span key={a} className="rounded-full px-2 py-0.5 font-medium text-violet-700" style={{ background: "#7c3aed18" }}>
+          <span key={a} className="rounded-full px-2 py-0.5 font-medium text-teal-700" style={{ background: "#14b8a618" }}>
             {AGENT_LABEL[a] ?? a}
           </span>
         ))}

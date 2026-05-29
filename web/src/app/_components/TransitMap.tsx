@@ -12,13 +12,26 @@ import {
   type GeneratedRoute,
   type Route,
 } from "~/app/map/transit-data";
-import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape, sliceShapeBetween } from "./map/geo";
+import { routeToGeoJSON, stopsToGeoJSON, geomBBox, portalsToGeoJSON, undergroundToGeoJSON, snapToShape, sliceShapeBetween, pointInGeometry } from "./map/geo";
 import { NeighbourhoodPanel } from "./map/NeighbourhoodPanel";
 import { RoutePanel } from "./map/RoutePanel";
 import { GeneratedRoutePanel } from "./map/GeneratedRoutePanel";
 import { StationPopup } from "./map/StationPopup";
 import { NewLineModal } from "./map/NewLineModal";
 import { ExperimentalPanel } from "./map/ExperimentalPanel";
+import { LayersDropdown, type OverlaySpec, type ActionRow } from "./map/LayersDropdown";
+import { IsochroneDetails } from "./map/IsochroneDetails";
+import { AIChatPanel } from "./map/AIChatPanel";
+import {
+  annotationBbox,
+  useAIAnnotations,
+  editableVertices,
+  moveVertex,
+  insertVertex,
+  deleteVertex,
+  type AIAnnotation,
+} from "./map/AIAnnotationsContext";
+import { COLOR_HEX } from "~/lib/ai-map-tools-client";
 import LinesPanel from "./map/LinesPanel";
 import { GameMode } from "./map/GameMode";
 import { MobileNav } from "./MobileNav";
@@ -114,6 +127,45 @@ function circlePolygon(center: [number, number], radiusM: number, steps = 36): [
   });
 }
 
+// Build a rounded-rectangle "pill" as a STRETCHABLE map image (9-slice).
+// 📖 Learn: stretchable images + icon-text-fit — MapLibre/Mapbox stretch only
+// the regions named by stretchX/stretchY to wrap whatever text the label holds,
+// so the rounded ends stay crisp at any width. All coords below are in the raw
+// image's own pixels (the on-screen size is divided by pixelRatio).
+function makePillImage(fill: string, stroke: string) {
+  const S = 40; // raw image is 40×40 px; pixelRatio 2 → 20 px tall on screen
+  const R = 20; // radius = half height → fully rounded "capsule" ends
+  const canvas = document.createElement("canvas");
+  canvas.width = S;
+  canvas.height = S;
+  const ctx = canvas.getContext("2d")!;
+  // Rounded-rect path via arcTo (clockwise from the top edge).
+  ctx.beginPath();
+  ctx.moveTo(R, 0);
+  ctx.arcTo(S, 0, S, S, R);
+  ctx.arcTo(S, S, 0, S, R);
+  ctx.arcTo(0, S, 0, 0, R);
+  ctx.arcTo(0, 0, S, 0, R);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+  return {
+    data: ctx.getImageData(0, 0, S, S),
+    options: {
+      pixelRatio: 2,
+      // A 2px-wide stretch band through the centre of each axis; everything
+      // outside it (the rounded ends) is held fixed.
+      stretchX: [[R - 1, R + 1]] as [number, number][],
+      stretchY: [[R - 1, R + 1]] as [number, number][],
+      // Inset where the text actually sits (keeps text off the rounded ends).
+      content: [8, 8, S - 8, S - 8] as [number, number, number, number],
+    },
+  };
+}
+
 function getRouteMetrics(routes: Route[]): RouteMetrics {
   return routes.reduce<RouteMetrics>(
     (acc, route) => {
@@ -174,6 +226,22 @@ export function TransitMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  const {
+    annotations: aiAnnotations,
+    visible: aiAnnotationsVisible,
+    setVisible: setAiAnnotationsVisible,
+    focusedId: aiFocusedId,
+    clearFocus: clearAiFocus,
+    editing: aiEditing,
+    updateAnnotationArgs: updateAiAnnotationArgs,
+  } = useAIAnnotations();
+
+  // Live refs so the drag handlers (attached once) always read the latest
+  // annotations + setter without re-attaching listeners on every change.
+  const aiAnnotationsRef = useRef<AIAnnotation[]>(aiAnnotations);
+  useEffect(() => { aiAnnotationsRef.current = aiAnnotations; }, [aiAnnotations]);
+  const updateAiAnnotationArgsRef = useRef(updateAiAnnotationArgs);
+  useEffect(() => { updateAiAnnotationArgsRef.current = updateAiAnnotationArgs; }, [updateAiAnnotationArgs]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [selectedStop, setSelectedStop] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -261,6 +329,14 @@ export function TransitMap() {
   const [showNewLineModal, setShowNewLineModal] = useState(false);
   const [showCoverageZones, setShowCoverageZones] = useState(false);
   const [showServiceHeatmap, setShowServiceHeatmap] = useState(false);
+  // 📖 Learn: a Set in state — we mutate by always building a NEW Set (never
+  // .add/.delete on the existing one), otherwise React's reference check sees
+  // the same object and skips re-render. Default pins match what used to live
+  // as standalone toolbar buttons (Population Density, Traffic) so existing
+  // users see no visual change until they unpin.
+  const [pinnedLayers, setPinnedLayers] = useState<Set<string>>(
+    () => new Set(["heatmap", "traffic"])
+  );
   const [simState, setSimState] = useState<{ hour: number; activeIds: string[] } | null>(null);
   const [linesHeight, setLinesHeight] = useState(() =>
     typeof window !== "undefined" ? Math.floor((window.innerHeight - 60) * 0.55) : 380
@@ -279,6 +355,15 @@ export function TransitMap() {
   const [showGameMode, setShowGameMode] = useState(false);
   const [showStationLabels, setShowStationLabels] = useState(false);
   const [showSimPanel, setShowSimPanel] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
+  // Right-click context menu — fires when the user right-clicks on the map.
+  // `x` and `y` are CSS pixel coordinates relative to the viewport so we can
+  // position the menu directly at the cursor.
+  const [mapCtxMenu, setMapCtxMenu] = useState<{ lat: number; lng: number; x: number; y: number; neighbourhood: string | null } | null>(null);
+  // Seed text passed to the AI chat (e.g. "About Yonge–Eglinton: " when the
+  // user picks "Ask AI about here"). The chat consumes this once on open then
+  // clears it; nulling here resets the pipe.
+  const [aiSeed, setAiSeed] = useState<string | null>(null);
   const [simResults, setSimResults] = useState<SimulationResult | null>(null);
   const [animAgents, setAnimAgents] = useState<import("./map/SimulationPanel").PerAgentResult[] | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -666,6 +751,16 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     setImperial(get("t_imperial"));
     setShowCoverageZones(get("t_showCoverageZones"));
     setShowServiceHeatmap(get("t_showServiceHeatmap"));
+    // Pinned layers — stored as JSON array. If missing, keep the default
+    // (heatmap + traffic) we set in initial useState, so first-time users
+    // see the same two quick-toggles they had before this refactor.
+    try {
+      const raw = localStorage.getItem("t_pinnedLayers");
+      if (raw) {
+        const arr = JSON.parse(raw) as unknown;
+        if (Array.isArray(arr)) setPinnedLayers(new Set(arr.filter((x): x is string => typeof x === "string")));
+      }
+    } catch { /* ignore malformed JSON */ }
     const stored = localStorage.getItem("darkMode");
     setDarkMode(stored !== null ? stored === "1" : window.matchMedia("(prefers-color-scheme: dark)").matches);
     setHighContrast(get("highContrast"));
@@ -699,6 +794,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
   }, [imperial]);
   useEffect(() => { localStorage.setItem("t_showCoverageZones", showCoverageZones ? "1" : "0"); }, [showCoverageZones]);
   useEffect(() => { localStorage.setItem("t_showServiceHeatmap", showServiceHeatmap ? "1" : "0"); }, [showServiceHeatmap]);
+  useEffect(() => { localStorage.setItem("t_pinnedLayers", JSON.stringify([...pinnedLayers])); }, [pinnedLayers]);
   useEffect(() => { localStorage.setItem("t_showStationLabels", showStationLabels ? "1" : "0"); }, [showStationLabels]);
 
   // Toggle station label visibility on all routes + bus stops when the setting changes.
@@ -1846,25 +1942,25 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           id: "gl-draw-polygon-fill",
           type: "fill",
           filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
-          paint: { "fill-color": "#6366f1", "fill-opacity": 0.1 },
+          paint: { "fill-color": "#0d9488", "fill-opacity": 0.1 },
         },
         {
           id: "gl-draw-polygon-stroke",
           type: "line",
           filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
-          paint: { "line-color": "#6366f1", "line-width": 2, "line-dasharray": [3, 2] },
+          paint: { "line-color": "#0d9488", "line-width": 2, "line-dasharray": [3, 2] },
         },
         {
           id: "gl-draw-point-outer",
           type: "circle",
           filter: ["all", ["==", "$type", "Point"], ["==", "meta", "vertex"]],
-          paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#6366f1", "circle-stroke-width": 2 },
+          paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#0d9488", "circle-stroke-width": 2 },
         },
         {
           id: "gl-draw-point-midpoint",
           type: "circle",
           filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
-          paint: { "circle-radius": 3, "circle-color": "#6366f1" },
+          paint: { "circle-radius": 3, "circle-color": "#0d9488" },
         },
       ],
     });
@@ -1923,7 +2019,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               ["boolean", ["feature-state", "brief"], false],
               "#c2410c",
               ["boolean", ["feature-state", "selected"], false],
-              "#6366f1",
+              "#0d9488",
               "#94a3b8",
             ],
             "fill-opacity": [
@@ -1952,7 +2048,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               ["boolean", ["feature-state", "brief"], false],
               "#ea580c",
               ["boolean", ["feature-state", "selected"], false],
-              "#6366f1",
+              "#0d9488",
               "#94a3b8",
             ],
             "line-width": [
@@ -2503,6 +2599,40 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         }
       });
 
+      // Right-click → context menu with "Ask AI about here". We look up the
+      // enclosing neighbourhood (if any) from the already-loaded geo data so
+      // we can label the menu with something meaningful instead of raw coords.
+      // 📖 Learn: Mapbox emits `contextmenu` for right-clicks. Calling
+      // e.preventDefault() suppresses the browser's native menu. e.point gives
+      // pixel coords inside the map canvas — we add the canvas offset to get
+      // viewport-relative coords for positioning the menu.
+      map.on("contextmenu", (e) => {
+        e.preventDefault();
+        const lng = e.lngLat.lng;
+        const lat = e.lngLat.lat;
+        const canvas = map.getCanvasContainer();
+        const rect = canvas.getBoundingClientRect();
+        let neighbourhood: string | null = null;
+        const feats = neighbourhoodsGeoJSONRef.current?.features;
+        if (feats) {
+          for (const f of feats) {
+            if (f.geometry && pointInGeometry([lng, lat], f.geometry)) {
+              neighbourhood = (f.properties?.AREA_NAME as string | undefined) ?? null;
+              break;
+            }
+          }
+        }
+        setMapCtxMenu({
+          lat, lng,
+          x: rect.left + e.point.x,
+          y: rect.top + e.point.y,
+          neighbourhood,
+        });
+      });
+      // Any subsequent map interaction dismisses the menu.
+      map.on("movestart", () => setMapCtxMenu(null));
+      map.on("click", () => setMapCtxMenu(null));
+
       // Pre-load GO rail shapes so routes render with real track geometry on first paint
       fetch("/gotransit/go-rail-shapes.geojson")
         .then((r) => r.json())
@@ -2518,6 +2648,11 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
     // Escape cancels an in-progress boundary draw
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Always dismiss the map context menu first (no state guard needed —
+        // setting to null when already null is a no-op).
+        setMapCtxMenu(null);
+      }
       if (e.key === "Enter" && addStationToLineRef.current) {
         setAddStationToLine(null);
         return;
@@ -2660,6 +2795,421 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       beforeId,
     );
   }, [showCoverageZones, routes, mapLoaded]);
+
+  // ── AI map annotations (from Ask AI tool calls) ─────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const HIGHLIGHT_SRC = "ai-highlights";
+    const CORRIDOR_SRC = "ai-corridors";
+    const PIN_SRC = "ai-pins";
+    const HIGHLIGHT_FILL = "ai-highlights-fill";
+    const HIGHLIGHT_LINE = "ai-highlights-line";
+    const CORRIDOR_LINE = "ai-corridors-line";
+    const PIN_LAYER = "ai-pins-layer";
+    const PIN_LABEL = "ai-pins-label";
+
+    // Separate pill images per theme so the chip background matches the map.
+    // Registered lazily (addImage throws if the id already exists).
+    const PILL_IMG = darkMode ? "ai-pill-dark" : "ai-pill-light";
+    if (!map.hasImage(PILL_IMG)) {
+      const pill = makePillImage(
+        darkMode ? "rgba(28,25,23,0.92)" : "rgba(255,255,255,0.96)", // stone-900 / white
+        darkMode ? "rgba(120,113,108,0.45)" : "rgba(168,162,158,0.5)", // stone border
+      );
+      map.addImage(PILL_IMG, pill.data, pill.options);
+    }
+
+    const removeAll = () => {
+      for (const id of [PIN_LABEL, PIN_LAYER, CORRIDOR_LINE, HIGHLIGHT_LINE, HIGHLIGHT_FILL]) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      }
+      for (const id of [PIN_SRC, CORRIDOR_SRC, HIGHLIGHT_SRC]) {
+        if (map.getSource(id)) map.removeSource(id);
+      }
+    };
+
+    if (!aiAnnotationsVisible || aiAnnotations.length === 0) {
+      removeAll();
+      return;
+    }
+
+    const highlightFeatures: GeoJSON.Feature[] = aiAnnotations
+      .filter((a) => a.kind === "highlight" && Array.isArray(a.args.polygon))
+      .map((a) => {
+        const ring = (a.args.polygon as number[][]).map(
+          (p) => [Number(p[0]), Number(p[1])] as [number, number],
+        );
+        if (ring.length > 0 && (ring[0]![0] !== ring[ring.length - 1]![0] || ring[0]![1] !== ring[ring.length - 1]![1])) {
+          ring.push(ring[0]!);
+        }
+        const colorKey = typeof a.args.color === "string" ? a.args.color : "teal";
+        const fill = COLOR_HEX[colorKey] ?? a.color ?? "#14b8a6";
+        return {
+          type: "Feature" as const,
+          geometry: { type: "Polygon" as const, coordinates: [ring] },
+          properties: {
+            label: a.label,
+            fill,
+            severity: String(a.args.severity ?? "info"),
+          },
+        };
+      });
+
+    const corridorFeatures: GeoJSON.Feature[] = aiAnnotations
+      .filter((a) => a.kind === "corridor")
+      .map((a) => {
+        const from = a.args.from as number[];
+        const to = a.args.to as number[];
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: [
+              [Number(from[0]), Number(from[1])],
+              [Number(to[0]), Number(to[1])],
+            ] as [number, number][],
+          },
+          properties: {
+            label: a.label,
+            color: a.color ?? "#0d9488",
+            mode: String(a.args.mode ?? "bus"),
+          },
+        };
+      });
+
+    const pinFeatures: GeoJSON.Feature[] = aiAnnotations
+      .filter((a) => a.kind === "pin")
+      .map((a) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [Number(a.args.lng), Number(a.args.lat)],
+        },
+        // Truncate long AI labels so the on-map text stays a tidy short tag
+        // instead of a cramped multi-line block. Full text lives in the chat chip.
+        properties: { note: a.label.length > 24 ? a.label.slice(0, 22).trimEnd() + "…" : a.label, icon: a.args.icon ?? "info", color: a.color ?? "#14b8a6" },
+      }));
+
+    const beforeId = map.getLayer("neighbourhood-fill") ? "neighbourhood-fill" : undefined;
+
+    if (map.getSource(HIGHLIGHT_SRC)) {
+      (map.getSource(HIGHLIGHT_SRC) as mapboxgl.GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: highlightFeatures,
+      });
+    } else {
+      map.addSource(HIGHLIGHT_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: highlightFeatures },
+      });
+      map.addLayer(
+        {
+          id: HIGHLIGHT_FILL,
+          type: "fill",
+          source: HIGHLIGHT_SRC,
+          paint: {
+            "fill-color": ["get", "fill"],
+            "fill-opacity": 0.25,
+          },
+        },
+        beforeId,
+      );
+      map.addLayer(
+        {
+          id: HIGHLIGHT_LINE,
+          type: "line",
+          source: HIGHLIGHT_SRC,
+          paint: {
+            "line-color": ["get", "fill"],
+            "line-width": 2,
+            "line-opacity": 0.7,
+          },
+        },
+        beforeId,
+      );
+    }
+
+    if (map.getSource(CORRIDOR_SRC)) {
+      (map.getSource(CORRIDOR_SRC) as mapboxgl.GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: corridorFeatures,
+      });
+    } else {
+      map.addSource(CORRIDOR_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: corridorFeatures },
+      });
+      map.addLayer(
+        {
+          id: CORRIDOR_LINE,
+          type: "line",
+          source: CORRIDOR_SRC,
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": 4,
+            "line-opacity": 0.85,
+            "line-dasharray": [2, 1],
+          },
+        },
+        beforeId,
+      );
+    }
+
+    // Update (or create) the source data in place.
+    if (map.getSource(PIN_SRC)) {
+      (map.getSource(PIN_SRC) as mapboxgl.GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: pinFeatures,
+      });
+    } else {
+      map.addSource(PIN_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: pinFeatures },
+      });
+    }
+
+    // ALWAYS rebuild the pin + label layers from scratch. Patching layout
+    // props on a long-lived layer proved unreliable (a layer created with the
+    // old "text-anchor: top" kept rendering below). Tearing down and re-adding
+    // guarantees the current config — including the "above the pin" placement
+    // and the theme's pill image — actually takes effect.
+    if (map.getLayer(PIN_LABEL)) map.removeLayer(PIN_LABEL);
+    if (map.getLayer(PIN_LAYER)) map.removeLayer(PIN_LAYER);
+
+    map.addLayer(
+      {
+        id: PIN_LAYER,
+        type: "circle",
+        source: PIN_SRC,
+        paint: {
+          "circle-radius": 7,
+          "circle-color": ["get", "color"],
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 2,
+        },
+      },
+      beforeId,
+    );
+    map.addLayer(
+      {
+        id: PIN_LABEL,
+        type: "symbol",
+        source: PIN_SRC,
+        layout: {
+          // The pill background wraps the text (icon-text-fit "both"), so we
+          // get a solid rounded chip instead of bare text fighting the map.
+          "icon-image": PILL_IMG,
+          "icon-text-fit": "both",
+          "icon-text-fit-padding": [1, 4, 1, 4],
+          "icon-allow-overlap": true,
+          "text-field": ["get", "note"],
+          "text-size": 10.5,
+          "text-max-width": 12,
+          // Always ABOVE the pin (deterministic — not collision-driven).
+          // text-anchor "bottom" puts the label's BOTTOM edge at the point,
+          // so it rises upward; negative Y offset lifts it clear of the dot.
+          "text-anchor": "bottom",
+          "text-offset": [0, -1.2],
+          "text-allow-overlap": true,
+        },
+        paint: {
+          "text-color": darkMode ? "#f5f5f4" : "#292524",
+        },
+      },
+      beforeId,
+    );
+  }, [aiAnnotations, aiAnnotationsVisible, mapLoaded, darkMode]);
+
+  // ── AI annotation editing: draggable vertex handles ─────────────────────────
+  // Two effects on purpose:
+  //  (1) setup — adds the handle source/layers + drag listeners ONCE per edit
+  //      session. It depends only on editing/visible/mapLoaded so an in-flight
+  //      drag never tears down its own listeners.
+  //  (2) data — refreshes handle positions whenever annotations change.
+  const HANDLE_SRC = "ai-edit-handles";
+  const HANDLE_VERTEX = "ai-edit-handles-vertex";
+  const HANDLE_MIDPOINT = "ai-edit-handles-midpoint";
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const teardown = () => {
+      for (const id of [HANDLE_MIDPOINT, HANDLE_VERTEX]) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      }
+      if (map.getSource(HANDLE_SRC)) map.removeSource(HANDLE_SRC);
+    };
+
+    if (!aiEditing || !aiAnnotationsVisible) {
+      teardown();
+      return;
+    }
+
+    map.addSource(HANDLE_SRC, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    // Midpoints render first (under) so the solid vertices sit on top.
+    map.addLayer({
+      id: HANDLE_MIDPOINT,
+      type: "circle",
+      source: HANDLE_SRC,
+      filter: ["==", ["get", "role"], "midpoint"],
+      paint: {
+        "circle-radius": 4,
+        "circle-color": "#fff",
+        "circle-opacity": 0.6,
+        "circle-stroke-color": "#14b8a6",
+        "circle-stroke-width": 1,
+      },
+    });
+    map.addLayer({
+      id: HANDLE_VERTEX,
+      type: "circle",
+      source: HANDLE_SRC,
+      filter: ["==", ["get", "role"], "vertex"],
+      paint: {
+        "circle-radius": 6,
+        "circle-color": "#fff",
+        "circle-stroke-color": "#14b8a6",
+        "circle-stroke-width": 3,
+      },
+    });
+
+    const findAnn = (annId: string) =>
+      aiAnnotationsRef.current.find((a) => a.id === annId) ?? null;
+
+    let dragging: { annId: string; index: number } | null = null;
+
+    const onMove = (e: mapboxgl.MapMouseEvent) => {
+      if (!dragging) return;
+      const ann = findAnn(dragging.annId);
+      if (!ann) return;
+      const { lng, lat } = e.lngLat;
+      updateAiAnnotationArgsRef.current(
+        dragging.annId,
+        moveVertex(ann, dragging.index, lng, lat),
+      );
+    };
+
+    const onUp = () => {
+      dragging = null;
+      map.off("mousemove", onMove);
+      map.dragPan.enable();
+    };
+
+    const onDown = (e: mapboxgl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      e.preventDefault(); // stop the map from panning
+      const props = f.properties as { annId: string; role: string; index: number };
+      const ann = findAnn(props.annId);
+      if (!ann) return;
+
+      if (props.role === "midpoint") {
+        // Insert a new corner at the midpoint, then drag that new corner.
+        const next = insertVertex(ann, props.index, e.lngLat.lng, e.lngLat.lat);
+        updateAiAnnotationArgsRef.current(props.annId, next);
+        dragging = { annId: props.annId, index: props.index + 1 };
+      } else {
+        dragging = { annId: props.annId, index: props.index };
+      }
+
+      map.dragPan.disable();
+      map.on("mousemove", onMove);
+      map.once("mouseup", onUp);
+    };
+
+    // Double-click a corner to delete it (polygons only; keeps ≥3 corners).
+    const onDblClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      const props = f.properties as { annId: string; index: number };
+      const ann = findAnn(props.annId);
+      if (!ann) return;
+      const next = deleteVertex(ann, props.index);
+      if (next) {
+        e.preventDefault();
+        updateAiAnnotationArgsRef.current(props.annId, next);
+      }
+    };
+
+    const setGrab = () => { map.getCanvas().style.cursor = "move"; };
+    const clearGrab = () => { map.getCanvas().style.cursor = ""; };
+
+    map.on("mousedown", HANDLE_VERTEX, onDown);
+    map.on("mousedown", HANDLE_MIDPOINT, onDown);
+    map.on("dblclick", HANDLE_VERTEX, onDblClick);
+    map.on("mouseenter", HANDLE_VERTEX, setGrab);
+    map.on("mouseleave", HANDLE_VERTEX, clearGrab);
+    map.on("mouseenter", HANDLE_MIDPOINT, setGrab);
+    map.on("mouseleave", HANDLE_MIDPOINT, clearGrab);
+
+    return () => {
+      map.off("mousedown", HANDLE_VERTEX, onDown);
+      map.off("mousedown", HANDLE_MIDPOINT, onDown);
+      map.off("dblclick", HANDLE_VERTEX, onDblClick);
+      map.off("mouseenter", HANDLE_VERTEX, setGrab);
+      map.off("mouseleave", HANDLE_VERTEX, clearGrab);
+      map.off("mouseenter", HANDLE_MIDPOINT, setGrab);
+      map.off("mouseleave", HANDLE_MIDPOINT, clearGrab);
+      map.off("mousemove", onMove);
+      map.dragPan.enable();
+      teardown();
+    };
+  }, [aiEditing, aiAnnotationsVisible, mapLoaded]);
+
+  // (2) Keep handle positions in sync with the current annotations.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !aiEditing || !aiAnnotationsVisible) return;
+    const src = map.getSource(HANDLE_SRC) as mapboxgl.GeoJSONSource | undefined;
+    if (!src) return;
+    const features: GeoJSON.Feature[] = aiAnnotations.flatMap((ann) =>
+      editableVertices(ann).map((v) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [v.lng, v.lat] },
+        properties: { annId: v.annId, role: v.role, index: v.index },
+      })),
+    );
+    src.setData({ type: "FeatureCollection", features });
+  }, [aiAnnotations, aiEditing, aiAnnotationsVisible, mapLoaded]);
+
+  // Fly camera when user clicks an annotation chip or AI emits fly_to.
+  const prevFlyToCountRef = useRef(0);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    if (aiFocusedId) {
+      const ann = aiAnnotations.find((a) => a.id === aiFocusedId);
+      const bbox = ann ? annotationBbox(ann) : null;
+      if (bbox) {
+        map.fitBounds(
+          [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+          { padding: 48, duration: 900, maxZoom: 14 },
+        );
+      }
+      clearAiFocus();
+      return;
+    }
+
+    const flyTos = aiAnnotations.filter((a) => a.kind === "flyTo");
+    if (flyTos.length > prevFlyToCountRef.current) {
+      const latest = flyTos[flyTos.length - 1]!;
+      const bbox = annotationBbox(latest);
+      if (bbox) {
+        map.fitBounds(
+          [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+          { padding: 48, duration: 900, maxZoom: 14 },
+        );
+      }
+    }
+    prevFlyToCountRef.current = flyTos.length;
+  }, [aiFocusedId, aiAnnotations, mapLoaded, clearAiFocus]);
 
   // ── service heatmap overlay ──────────────────────────────────────────────────
   useEffect(() => {
@@ -3003,7 +3553,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         map.addLayer({ id: "tool-snap-line", type: "line", source: SRC, filter: ["==", ["get", "kind"], "snap-line"], paint: { "line-color": "#f59e0b", "line-width": 2, "line-opacity": 0.9, "line-dasharray": [4, 4] } });
         map.addLayer({ id: "tool-snap-from", type: "circle", source: SRC, filter: ["==", ["get", "kind"], "snap-from"], paint: { "circle-radius": 6, "circle-color": "transparent", "circle-stroke-color": "#f59e0b", "circle-stroke-width": 2.5 } });
         map.addLayer({ id: "tool-snap-to", type: "circle", source: SRC, filter: ["==", ["get", "kind"], "snap-to"], paint: { "circle-radius": 7, "circle-color": "#f59e0b", "circle-opacity": 0, "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
-        map.addLayer({ id: "tool-transfer-pulse", type: "circle", source: SRC, filter: ["==", ["get", "kind"], "transfer"], paint: { "circle-radius": 14, "circle-color": "transparent", "circle-stroke-color": "#7c3aed", "circle-stroke-width": 2.5, "circle-stroke-opacity": 0 } });
+        map.addLayer({ id: "tool-transfer-pulse", type: "circle", source: SRC, filter: ["==", ["get", "kind"], "transfer"], paint: { "circle-radius": 14, "circle-color": "transparent", "circle-stroke-color": "#0d9488", "circle-stroke-width": 2.5, "circle-stroke-opacity": 0 } });
       }
 
       const getFeats = () => toolAnimFeaturesRef.current;
@@ -3474,10 +4024,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             hiddenRoutes={hiddenRoutes}
             selectedRoute={selectedRoute}
             stationPopulations={stationPopulations}
-            showCoverageZones={showCoverageZones}
-            onToggleCoverageZones={setShowCoverageZones}
-            showServiceHeatmap={showServiceHeatmap}
-            onToggleServiceHeatmap={setShowServiceHeatmap}
             onZoomToCity={(lat, lng, zoom) => mapRef.current?.flyTo({ center: [lng, lat], zoom: zoom ?? 11, duration: 1200 })}
             style={{ maxHeight: `calc(100vh - 48px - ${linesHeight}px - 10px)` }}
             isochroneOrigin={isochroneOrigin}
@@ -3592,21 +4138,21 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {/* Add-station notification — below top-center toolbar */}
       {addStationToLine && (
         <div className="pointer-events-none absolute top-[85px] left-0 right-0 flex justify-center">
-          <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-100 shadow-sm">
-            <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-indigo-700 dark:text-indigo-200">
+          <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-teal-200 dark:border-teal-700 bg-teal-100 shadow-sm">
+            <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-teal-700 dark:text-teal-200">
               <span>{snapProgress?.routeId === addStationToLine ? "Placing…" : "Click map to add station"}</span>
-              <span className="h-4 w-px bg-indigo-200 dark:bg-indigo-700" />
+              <span className="h-4 w-px bg-teal-200 dark:bg-teal-700" />
               <button
                 onClick={() => setAddStationToLine(null)}
-                className="font-semibold hover:text-indigo-900 dark:hover:text-indigo-100 transition-colors"
+                className="font-semibold hover:text-teal-900 dark:hover:text-teal-100 transition-colors"
               >
                 Done
               </button>
             </div>
             {snapProgress?.routeId === addStationToLine && (
-              <div className="h-0.5 bg-indigo-100 dark:bg-indigo-800">
+              <div className="h-0.5 bg-teal-100 dark:bg-teal-800">
                 <div
-                  className="h-full bg-indigo-400 dark:bg-indigo-400 transition-[width] duration-500 ease-out"
+                  className="h-full bg-teal-400 dark:bg-teal-400 transition-[width] duration-500 ease-out"
                   style={{ width: `${snapProgress.pct}%` }}
                 />
               </div>
@@ -3633,50 +4179,130 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {/* Top-center toolbar (desktop only) */}
       <div className="pointer-events-none hidden md:flex absolute top-5 left-0 right-0 justify-center gap-2">
-        {/* Heatmap toggle */}
-        <button
-          onClick={() => setShowHeatmap((v) => !v)}
-          className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
-            showHeatmap ? "text-stone-700" : "text-stone-400"
-          }`}
-        >
-          {popLoading ? (
-            <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" />
-          ) : (
-            <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: showHeatmap ? "#ef4444" : "#d1d5db" }} />
+        {/* Layers dropdown — ALL map overlays live here. Pinned ones render as quick-toggle pills before the dropdown button. */}
+        <LayersDropdown
+          overlays={(
+            [
+              { id: "heatmap", label: "Population Density", sub: "Residents per km²", on: showHeatmap, loading: popLoading, color: "#ef4444", onToggle: () => setShowHeatmap((v) => !v) },
+              { id: "traffic", label: "Traffic", sub: "Current Mapbox traffic", on: showTraffic, loading: trafficLoading, color: "#f59e0b", onToggle: () => setShowTraffic((v) => !v) },
+              { id: "canadaPop", label: "Canada pop density", sub: "Country-wide population heatmap", on: showCanadaPop, loading: canadaPopLoading, color: "#fbbf24", onToggle: async () => {
+                if (canadaPopLoading) return;
+                const newValue = !showCanadaPop;
+                setShowCanadaPop(newValue);
+                if (newValue) {
+                  setCanadaPopLoading(true);
+                  // 📖 Learn: the dataset is loaded lazily, so we show a spinner
+                  // for a beat after toggling on. 1 s is an empirical wait —
+                  // matches the original implementation in the gear menu.
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                  setCanadaPopLoading(false);
+                }
+              } },
+              { id: "stationLabels", label: "Station labels", sub: "Show stop names on each line", on: showStationLabels, color: "#78716c", onToggle: () => setShowStationLabels((v) => !v) },
+              { id: "coverage", label: "Coverage Zones", sub: "500 m radius per stop", on: showCoverageZones, color: "#0ea5e9", onToggle: () => setShowCoverageZones((v) => !v) },
+              { id: "serviceHeatmap", label: "Service Heatmap", sub: "Density weighted by mode", on: showServiceHeatmap, color: "#f97316", onToggle: () => setShowServiceHeatmap((v) => !v) },
+              { id: "liveVehicles", label: "Live vehicles", sub: "Real-time TTC positions", on: showLiveVehicles, color: "#10b981", onToggle: () => setShowLiveVehicles((v) => !v) },
+              { id: "transitDesert", label: "Transit deserts", sub: "Underserved population areas", on: showTransitDesert, loading: desertComputing, color: "#f43f5e", onToggle: () => setShowTransitDesert((v) => !v) },
+              { id: "catchment", label: "Catchment circles", sub: "Radius around each station (advanced config in Tools panel)", on: showCatchment, color: "#10b981", onToggle: () => setShowCatchment((v) => !v) },
+              { id: "disruption", label: "Disruption zones", sub: "Noise/impact buffer (advanced config in Tools panel)", on: showDisruption, color: "#f43f5e", onToggle: () => setShowDisruption((v) => !v) },
+              {
+                id: "isochrone",
+                label: "Isochrone (travel time)",
+                sub: isochroneOrigin ? `${isochroneMinutes} min ${isoMode}` : "Pick origin to start",
+                on: !!isochroneOrigin,
+                color: "#0d9488",
+                // 📖 Learn: noPin on Isochrone — its config UI lives inline,
+                // so pinning it as a toolbar pill would lose the configurator.
+                noPin: true,
+                onToggle: () => {
+                  // Toggle off only — toggling on without an origin is meaningless;
+                  // user must use the inline picker to set one.
+                  if (isochroneOrigin) setIsochroneOrigin(null);
+                  else setPickingIsochroneOrigin(true);
+                },
+                details: (
+                  <IsochroneDetails
+                    routes={routes}
+                    isochroneOrigin={isochroneOrigin}
+                    onSetIsochroneOrigin={setIsochroneOrigin}
+                    isochroneMinutes={isochroneMinutes}
+                    onSetIsochroneMinutes={setIsochroneMinutes}
+                    isoMode={isoMode}
+                    onSetIsoMode={setIsoMode}
+                    pickingIsochroneOrigin={pickingIsochroneOrigin}
+                    onStartPickIsochroneOrigin={() => setPickingIsochroneOrigin(true)}
+                  />
+                ),
+              },
+              {
+                id: "aiFindings",
+                label: "AI findings",
+                sub: aiAnnotations.length > 0
+                  ? `${aiAnnotations.length} annotation${aiAnnotations.length === 1 ? "" : "s"} from chat`
+                  : "Ask AI to draw on the map",
+                on: aiAnnotationsVisible && aiAnnotations.length > 0,
+                color: "#14b8a6",
+                onToggle: () => setAiAnnotationsVisible(!aiAnnotationsVisible),
+              },
+            ] satisfies OverlaySpec[]
           )}
-          Population Density
-        </button>
-
-        {/* Traffic toggle */}
-        <button
-          onClick={() => setShowTraffic((v) => !v)}
-          disabled={trafficLoading}
-          className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all disabled:cursor-wait ${
-            showTraffic ? "text-stone-700" : "text-stone-400"
-          }`}
-        >
-          {trafficLoading ? (
-            <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" />
-          ) : (
-            <span
-              className="h-3 w-3 shrink-0 rounded-full"
-              style={{ background: showTraffic ? "#f59e0b" : "#d1d5db" }}
-            />
+          pinned={pinnedLayers}
+          onTogglePin={(id) => setPinnedLayers((prev) => {
+            // 📖 Learn: build a new Set so React detects the state change.
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+          })}
+          actions={(
+            [
+              {
+                id: "measure",
+                label: measureMode
+                  ? (measureDistanceKm != null ? `Measuring · ${measureDistanceKm.toFixed(2)} km` : "Click two points on map…")
+                  : "Measure distance",
+                active: measureMode,
+                onClick: () => setMeasureMode((v) => !v),
+                icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <path d="M2 11l3-3 3 3 3-3 3 3M2 13.5h12" />
+                  </svg>
+                ),
+              },
+              {
+                id: "customOverlay",
+                label: customOverlay ? "Custom overlay loaded" : "Load custom overlay…",
+                badge: customOverlay
+                  ? (customOverlayName.length > 22 ? customOverlayName.slice(0, 21) + "…" : customOverlayName)
+                  : undefined,
+                active: !!customOverlay,
+                onClick: () => (customOverlay ? clearOverlay() : handleOverlayImport()),
+                icon: customOverlay ? (
+                  // X icon when loaded — clicking clears
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="h-3.5 w-3.5 text-orange-400">
+                    <path d="M2 2l12 12M14 2L2 14" />
+                  </svg>
+                ) : (
+                  // Upload arrow when empty
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <path d="M8 2v8M5 7l3 3 3-3" />
+                    <rect x="2" y="11" width="12" height="3" rx="1" fill="none" />
+                  </svg>
+                ),
+              },
+            ] satisfies ActionRow[]
           )}
-          Traffic
-        </button>
+        />
 
         {/* Simulate button */}
         <button
           onClick={() => { setShowSimPanel((v) => !v); setShowPlansPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
-            showSimPanel ? "text-violet-700 border-violet-300 bg-violet-50" : "text-stone-400"
+            showSimPanel ? "text-teal-700 border-teal-300 bg-teal-50" : "text-stone-400"
           }`}
         >
           <span
             className="h-3 w-3 shrink-0 rounded-full"
-            style={{ background: showSimPanel ? "#7c3aed" : "#d1d5db" }}
+            style={{ background: showSimPanel ? "#0d9488" : "#d1d5db" }}
           />
           Simulate
         </button>
@@ -3685,14 +4311,29 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => { setShowPlansPanel((v) => !v); setShowSimPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
-            showPlansPanel ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-[#D7D7D7] text-stone-400"
+            showPlansPanel ? "border-teal-300 bg-teal-50 text-teal-700" : "border-[#D7D7D7] text-stone-400"
           }`}
         >
           <span
             className="h-3 w-3 shrink-0 rounded-full transition-colors"
-            style={{ background: showPlansPanel ? "#6366f1" : currentPlanId ? (planIsDirty ? "#f59e0b" : "#6366f1") : "#d1d5db" }}
+            style={{ background: showPlansPanel ? "#0d9488" : currentPlanId ? (planIsDirty ? "#f59e0b" : "#0d9488") : "#d1d5db" }}
           />
           Plans
+        </button>
+
+        {/* Ask AI button — opens free-form chat without requiring map selection.
+            For the Council deliberation workflow, users still select neighbourhoods
+            on the map and click "Generate Route". This is the conversational entry point. */}
+        <button
+          onClick={() => setShowAIChat((v) => !v)}
+          className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
+            showAIChat ? "border-teal-300 bg-teal-50 text-teal-700" : "border-[#D7D7D7] text-stone-400"
+          }`}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 shrink-0">
+            <path d="M8 1.5L9.5 6L14 7.5L9.5 9L8 13.5L6.5 9L2 7.5L6.5 6Z" />
+          </svg>
+          Ask AI
         </button>
 
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
@@ -3726,7 +4367,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               onClick={() => handleSetDrawMode("select")}
               aria-label="Select neighbourhoods"
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
-                drawMode === "select" ? "bg-indigo-50 text-indigo-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
+                drawMode === "select" ? "bg-teal-50 text-teal-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
               }`}
             >
               {/* Cursor + dashed selection box — indicates click-to-select-region */}
@@ -3750,7 +4391,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             <button
               onClick={() => handleSetDrawMode("boundary")}
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
-                drawMode === "boundary" ? "bg-indigo-50 text-indigo-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
+                drawMode === "boundary" ? "bg-teal-50 text-teal-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
               }`}
             >
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" className="h-4 w-4">
@@ -3847,18 +4488,54 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {simState && (
         <div className="pointer-events-none absolute top-[85px] left-0 right-0 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm text-violet-700 shadow-sm animate-pulse">
-            <span className="h-2 w-2 rounded-full bg-violet-500" />
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm text-teal-700 shadow-sm animate-pulse">
+            <span className="h-2 w-2 rounded-full bg-teal-500" />
             <span className="font-semibold">{`${simState.hour === 0 ? "12" : simState.hour > 12 ? simState.hour - 12 : simState.hour}:00 ${simState.hour < 12 ? "AM" : "PM"}`}</span>
-            <span className="text-violet-400 text-xs">{simState.activeIds.length} routes active</span>
+            <span className="text-teal-400 text-xs">{simState.activeIds.length} routes active</span>
           </div>
         </div>
       )}
 
-      {(selectedNeighbourhoods.size > 0 || selectedStations.size > 0) && !addStationToLine && (
+      {/* Show in Select mode (even before the first click, as a discoverable
+          hint) or whenever there's any selection. */}
+      {(drawMode === "select" || selectedNeighbourhoods.size > 0 || selectedStations.size > 0) && !addStationToLine && (
         <div className="pointer-events-none absolute top-[85px] left-0 right-0 flex justify-center">
-          <div className="pointer-events-auto flex items-center rounded-xl border border-stone-200 bg-white/95 dark:border-stone-600 dark:bg-stone-900/95 backdrop-blur-sm px-4 py-2.5 text-sm font-medium text-stone-800 dark:text-stone-100 shadow-md">
-            {selectedNeighbourhoods.size} neighbourhood{selectedNeighbourhoods.size !== 1 ? "s" : ""}, {selectedStations.size} station{selectedStations.size !== 1 ? "s" : ""} selected
+          {/* Claude Code-style selection chip: subtle outline, region glyph,
+              bold count, and an inline clear button. */}
+          <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-stone-200 bg-white/95 dark:border-stone-700 dark:bg-stone-900/95 backdrop-blur-sm py-1.5 pl-2.5 pr-1.5 text-[13px] text-stone-500 dark:text-stone-400 shadow-sm">
+            {/* stacked-region glyph */}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0 text-stone-400">
+              <path d="M8 1.8 14 5 8 8.2 2 5 8 1.8Z" />
+              <path d="M2.4 8 8 10.9 13.6 8" />
+              <path d="M2.4 11 8 13.9 13.6 11" />
+            </svg>
+            {selectedNeighbourhoods.size === 0 && selectedStations.size === 0 ? (
+              // In Select mode but nothing picked yet — guide the user.
+              <span className="pr-1">Click areas on the map to select</span>
+            ) : (
+              <>
+                <span>
+                  <span className="font-medium text-stone-700 dark:text-stone-200">{selectedNeighbourhoods.size}</span>
+                  {" "}neighbourhood{selectedNeighbourhoods.size !== 1 ? "s" : ""}
+                  {selectedStations.size > 0 && (
+                    <>
+                      , <span className="font-medium text-stone-700 dark:text-stone-200">{selectedStations.size}</span>
+                      {" "}station{selectedStations.size !== 1 ? "s" : ""}
+                    </>
+                  )}
+                  {" "}selected
+                </span>
+                <button
+                  onClick={handleClearAll}
+                  aria-label="Clear selection"
+                  className="ml-0.5 flex h-5 w-5 items-center justify-center rounded text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+                >
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3 w-3">
+                    <path d="M3 3l6 6M9 3l-6 6" />
+                  </svg>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -3875,6 +4552,18 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onClose={() => { setShowSimPanel(false); setSimResults(null); setAnimAgents(null); }}
           onResults={(r) => { setSimResults(r); setAnimAgents(null); }}
           onAnimate={(agents) => setAnimAgents(agents)}
+          onAskAI={(seg) => {
+            // Build a concrete, context-rich seed so the assistant has the
+            // numbers it needs without the user re-typing them.
+            const stress = Math.round(seg.stress_pct);
+            const delta = Math.round(seg.delta_pct);
+            const deltaStr = delta > 0 ? ` (+${delta}% vs baseline)` : delta < 0 ? ` (${delta}% vs baseline)` : "";
+            const line = seg.line_name ? ` on ${seg.line_name}` : "";
+            setAiSeed(
+              `In my simulation, the segment ${seg.from_stop} → ${seg.to_stop}${line} is at ${stress}% load${deltaStr}. What's likely causing this and what could I change to relieve it?`
+            );
+            setShowAIChat(true);
+          }}
         />
       </div>
 
@@ -3900,6 +4589,51 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           darkMode={darkMode}
         />
       </div>
+
+      {/* Ask AI chat — floating, draggable, self-positioning.
+          Collision avoidance: when the right rail is occupied (a Sim/Plans/
+          Route/Generated panel is open), the panel slides left to avoid overlap. */}
+      {showAIChat && (
+        <AIChatPanel
+          routes={routes}
+          onClose={() => { setShowAIChat(false); setAiSeed(null); }}
+          seed={aiSeed}
+          onSeedConsumed={() => setAiSeed(null)}
+          avoidRightRail={
+            showSimPanel || showPlansPanel || selectedRoute !== null || showGeneratedPanel
+          }
+        />
+      )}
+
+      {/* Map right-click context menu. Positioned at the cursor; closes on
+          outside-click via the map listeners installed above, or on Escape. */}
+      {mapCtxMenu && (
+        <div
+          className="pointer-events-auto fixed z-40 min-w-44 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg"
+          style={{ left: Math.min(mapCtxMenu.x, window.innerWidth - 200), top: Math.min(mapCtxMenu.y, window.innerHeight - 80) }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="border-b border-stone-100 px-3 py-2 text-[11px] text-stone-500">
+            {mapCtxMenu.neighbourhood ?? `${mapCtxMenu.lat.toFixed(4)}, ${mapCtxMenu.lng.toFixed(4)}`}
+          </div>
+          <button
+            onClick={() => {
+              const label = mapCtxMenu.neighbourhood
+                ? `About ${mapCtxMenu.neighbourhood} (${mapCtxMenu.lat.toFixed(4)}, ${mapCtxMenu.lng.toFixed(4)}): `
+                : `About this location (${mapCtxMenu.lat.toFixed(4)}, ${mapCtxMenu.lng.toFixed(4)}): `;
+              setAiSeed(label);
+              setShowAIChat(true);
+              setMapCtxMenu(null);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-stone-700 hover:bg-teal-50 hover:text-teal-700"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-teal-500">
+              <path d="M8 1.5L9.5 6L14 7.5L9.5 9L8 13.5L6.5 9L2 7.5L6.5 6Z" />
+            </svg>
+            Ask AI about here
+          </button>
+        </div>
+      )}
 
       {/* Side panel — only one shown at a time to prevent overlap */}
       <div
@@ -4292,7 +5026,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                     {authUser.picture ? (
                       <Image src={authUser.picture} alt={authUser.name ?? "User"} width={32} height={32} className="h-8 w-8 rounded-full object-cover shrink-0" />
                     ) : (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-100 text-xs font-semibold text-teal-600">
                         {(authUser.name ?? authUser.email ?? "U")[0]?.toUpperCase()}
                       </div>
                     )}
@@ -4314,66 +5048,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                 )}
               </div>
 
-              {/* Map layers */}
-              <div className="border-b border-stone-100 py-3">
-                <p className="px-4 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-widest text-stone-300">Map layers</p>
-                {([
-                  ["Canada pop density", showCanadaPop, async () => {
-    if (canadaPopLoading) return;
-    const newValue = !showCanadaPop;
-    setShowCanadaPop(newValue);
-    if (newValue) {
-      setCanadaPopLoading(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setCanadaPopLoading(false);
-    }
-  }, "amber", true] as const,
-                  ["Station labels", showStationLabels, () => setShowStationLabels((v) => !v), "stone", false] as const,
-                  ["Coverage zones", showCoverageZones, () => setShowCoverageZones((v) => !v), "sky", false] as const,
-                  ["Service heatmap", showServiceHeatmap, () => setShowServiceHeatmap((v) => !v), "orange", false] as const,
-                  ["Live vehicles", showLiveVehicles, () => setShowLiveVehicles((v) => !v), "emerald", false] as const,
-                  ["Transit deserts", showTransitDesert, () => setShowTransitDesert((v) => !v), "rose", false] as const,
-                  ["Catchment circles", showCatchment, () => setShowCatchment((v) => !v), "emerald", false] as const,
-                  ["Disruption zones", showDisruption, () => setShowDisruption((v) => !v), "rose", false] as const,
-                  ["Measure distance", measureMode, () => setMeasureMode((v) => !v), "amber", false] as const,
-                ] as [string, boolean, () => void | Promise<void>, string, boolean][]).map(([label, on, toggle, , beta]) => (
-                  <button key={label} onClick={() => (toggle as () => Promise<void>)()} className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors">
-                    <span className="flex items-center gap-1.5">
-                      {label}
-                      {label === "Canada pop density" && canadaPopLoading && (
-                        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500" />
-                      )}
-                      {beta && !(label === "Canada pop density" && canadaPopLoading) && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>}
-                    </span>
-                    <span className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${highContrast ? (on ? "bg-yellow-400" : "bg-black ring-2 ring-white") : (on ? "bg-stone-700" : "bg-stone-200")}`}>
-                      <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-transform ${highContrast ? (on ? "bg-black translate-x-3.5" : "bg-[#ffffff] translate-x-0.5") : (on ? "bg-white translate-x-3.5" : "bg-white translate-x-0.5")}`} />
-                    </span>
-                  </button>
-                ))}
-                {desertComputing && (
-                  <p className="px-4 py-1 text-[11px] text-rose-400 animate-pulse">Computing desert scores…</p>
-                )}
-                {/* Custom overlay — file load action */}
-                <button
-                  onClick={() => customOverlay ? (clearOverlay()) : handleOverlayImport()}
-                  className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
-                >
-                  <span className={customOverlay ? "text-orange-500" : ""}>
-                    {customOverlay
-                      ? (customOverlayName.length > 20 ? customOverlayName.slice(0, 19) + "…" : customOverlayName)
-                      : "Custom overlay…"}
-                  </span>
-                  {customOverlay ? (
-                    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0 text-orange-400" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2 2l12 12M14 2L2 14"/>
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0 text-stone-400" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M8 2v8M5 7l3 3 3-3"/><rect x="2" y="11" width="12" height="3" rx="1" fill="none"/>
-                    </svg>
-                  )}
-                </button>
-              </div>
+              {/* Map layers moved to the top-toolbar Layers dropdown. */}
 
               {/* App settings */}
               <div className="border-b border-stone-100 py-1">
@@ -4388,7 +5063,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   <button key={label} onClick={toggle} className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors">
                     <span className="flex items-center gap-1.5">
                       {label}
-                      {beta && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>}
+                      {beta && <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[9px] font-bold text-teal-600 uppercase tracking-wide">beta</span>}
                     </span>
                     <span className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${highContrast ? (on ? "bg-yellow-400" : "bg-black ring-2 ring-white") : (on ? "bg-stone-700" : "bg-stone-200")}`}>
                       <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-transform ${highContrast ? (on ? "bg-black translate-x-3.5" : "bg-[#ffffff] translate-x-0.5") : (on ? "bg-white translate-x-3.5" : "bg-white translate-x-0.5")}`} />
@@ -4757,13 +5432,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {/* Agent animation controls */}
       {animAgents && (
         <div className="pointer-events-auto absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl border border-[#D7D7D7] bg-white px-5 py-3 shadow-xl">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="9" />
             </svg>
           </div>
           <div className="text-sm text-stone-700">
-            Animating <span className="font-semibold text-violet-700">{new Set(animAgents.map((a) => a.agent_id)).size.toLocaleString()}</span> agents
+            Animating <span className="font-semibold text-teal-700">{new Set(animAgents.map((a) => a.agent_id)).size.toLocaleString()}</span> agents
           </div>
           {animClockLabel && (
             <div className="rounded-lg bg-stone-900 px-2.5 py-1 font-mono text-sm font-semibold text-white tabular-nums">
@@ -4772,7 +5447,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           )}
           <div className="flex items-center gap-2 text-[11px] text-stone-400">
             <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> Low-income</span>
-            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Mid-income</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-teal-500" /> Mid-income</span>
             <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-cyan-500" /> High-income</span>
           </div>
           <button
@@ -4788,7 +5463,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               animStartRef.current = null;
               setAnimAgents([...animAgents]);
             }}
-            className="rounded-lg px-3 py-1 text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+            className="rounded-lg px-3 py-1 text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 transition-colors"
           >
             Replay
           </button>

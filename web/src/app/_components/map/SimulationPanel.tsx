@@ -107,6 +107,8 @@ export interface SimulationPanelProps {
   onClose: () => void;
   onResults: (result: SimulationResult | null) => void;
   onAnimate: (agents: PerAgentResult[]) => void;
+  /** Optional callback for the per-segment "Ask AI" affordance on the Stress tab. */
+  onAskAI?: (segment: StressSegment) => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -193,7 +195,7 @@ function ScoreBadge({ label, value, color }: { label: string; value: number; col
   );
 }
 
-function StressBar({ segment, isProposed }: { segment: StressSegment; isProposed: boolean }) {
+function StressBar({ segment, isProposed, onAskAI }: { segment: StressSegment; isProposed: boolean; onAskAI?: (segment: StressSegment) => void }) {
   // Both proposed and existing use green/amber/red on the same global scale.
   // Existing lines are further colored by delta; proposed lines by absolute stress_pct.
   const loadColor = segment.stress_pct > 66 ? "#ef4444"
@@ -209,15 +211,20 @@ function StressBar({ segment, isProposed }: { segment: StressSegment; isProposed
     : null;
   const deltaColor = delta > 2 ? "#10b981" : "#ef4444";
 
+  // 📖 Learn: only surface the "Ask AI" affordance for genuinely problematic
+  // segments. < 50% stress isn't a hotspot; cluttering every row with the
+  // button would dilute the signal.
+  const isHotspot = segment.stress_pct >= 50 || segment.delta_pct >= 25;
+
   return (
-    <div className="flex items-center gap-2 py-1">
+    <div className="group flex items-center gap-2 py-1">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="truncate text-xs text-stone-700 font-medium">
             {segment.from_stop} → {segment.to_stop}
           </p>
           {isProposed && (
-            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-px">
+            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-teal-600 bg-teal-50 border border-teal-200 rounded px-1 py-px">
               new
             </span>
           )}
@@ -229,6 +236,18 @@ function StressBar({ segment, isProposed }: { segment: StressSegment; isProposed
         </p>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {onAskAI && isHotspot && (
+          <button
+            onClick={() => onAskAI(segment)}
+            title="Ask AI about this segment"
+            aria-label="Ask AI about this segment"
+            className="flex h-5 w-5 items-center justify-center rounded text-stone-300 opacity-0 transition-opacity hover:bg-teal-50 hover:text-teal-600 group-hover:opacity-100"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+              <path d="M8 1.5L9.5 6L14 7.5L9.5 9L8 13.5L6.5 9L2 7.5L6.5 6Z" />
+            </svg>
+          </button>
+        )}
         {deltaLabel && (
           <span className="text-[10px] font-semibold w-10 text-right" style={{ color: deltaColor }}>
             {deltaLabel}
@@ -287,7 +306,7 @@ function TimeRangeSlider({
         <div className="absolute inset-x-0 h-1.5 rounded-full bg-stone-200" />
         {/* Highlighted range */}
         <div
-          className="absolute h-1.5 rounded-full bg-violet-500"
+          className="absolute h-1.5 rounded-full bg-teal-500"
           style={{ left: `${leftPct}%`, right: `${100 - rightPct}%` }}
         />
         {/* Start handle */}
@@ -332,7 +351,7 @@ function TimeRangeSlider({
 
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
-export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }: SimulationPanelProps) {
+export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate, onAskAI }: SimulationPanelProps) {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [result, setResult]           = useState<SimulationResult | null>(null);
@@ -425,8 +444,8 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100">
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
               <path d="M12 6v6l4 2" />
             </svg>
@@ -482,7 +501,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
               min={500} max={10_000} step={500}
               value={agentCount}
               onChange={(e) => setAgentCount(Number(e.target.value))}
-              className="mt-1 w-full accent-violet-600"
+              className="mt-1 w-full accent-teal-600"
             />
             <div className="flex justify-between text-[10px] text-stone-400">
               <span>500 (fast)</span>
@@ -497,7 +516,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
             className={`w-full rounded-xl py-2 text-sm font-medium transition-all ${
               loading
                 ? "bg-stone-100 text-stone-400 cursor-not-allowed"
-                : "bg-violet-600 text-white hover:bg-violet-700 active:scale-[0.98]"
+                : "bg-teal-600 text-white hover:bg-teal-700 active:scale-[0.98]"
             }`}
           >
             {loading ? "Running simulation…" : hasProposed ? "Run Scenario Comparison" : "Run Baseline Simulation"}
@@ -512,7 +531,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
               </p>
               <div className="h-1 rounded-full bg-stone-100 overflow-hidden">
                 <div
-                  className="h-full bg-violet-400 rounded-full transition-all duration-700"
+                  className="h-full bg-teal-400 rounded-full transition-all duration-700"
                   style={{ width: speedsFetching ? "20%" : "70%", animation: "pulse 1.5s ease-in-out infinite" }}
                 />
               </div>
@@ -537,7 +556,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex-1 py-2 transition-colors ${
                   activeTab === tab.id
-                    ? "border-b-2 border-violet-600 text-violet-700 bg-white"
+                    ? "border-b-2 border-teal-600 text-teal-700 bg-white"
                     : "text-stone-500 hover:text-stone-700"
                 }`}
               >
@@ -559,10 +578,10 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                       </p>
                       <p className="text-[10px] text-emerald-500">min avg</p>
                     </div>
-                    <div className="rounded-xl bg-violet-50 border border-violet-100 p-3 text-center">
-                      <p className="text-[10px] text-violet-600 uppercase tracking-wide mb-0.5">Newly reached</p>
-                      <p className="text-2xl font-bold text-violet-700">{result.delta.newly_accessible_agents}</p>
-                      <p className="text-[10px] text-violet-500">agents</p>
+                    <div className="rounded-xl bg-teal-50 border border-teal-100 p-3 text-center">
+                      <p className="text-[10px] text-teal-600 uppercase tracking-wide mb-0.5">Newly reached</p>
+                      <p className="text-2xl font-bold text-teal-700">{result.delta.newly_accessible_agents}</p>
+                      <p className="text-[10px] text-teal-500">agents</p>
                     </div>
                   </div>
                 )}
@@ -610,7 +629,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
 
                 <button
                   onClick={() => onAnimate(result.per_agent.filter((p) => p.path_coords.length > 0))}
-                  className="w-full rounded-xl py-2 text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 active:scale-[0.98] transition-all"
+                  className="w-full rounded-xl py-2 text-sm font-medium bg-teal-600 text-white hover:bg-teal-700 active:scale-[0.98] transition-all"
                 >
                   Animate agents on map
                 </button>
@@ -627,9 +646,9 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
             {activeTab === "equity" && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <ScoreBadge label={result.has_proposed_lines ? "Baseline equity score" : "Equity score"} value={result.equity.baseline_score} color={result.has_proposed_lines ? "#94a3b8" : "#7c3aed"} />
+                  <ScoreBadge label={result.has_proposed_lines ? "Baseline equity score" : "Equity score"} value={result.equity.baseline_score} color={result.has_proposed_lines ? "#94a3b8" : "#0d9488"} />
                   {result.has_proposed_lines && (
-                    <ScoreBadge label="Scenario equity score" value={result.equity.scenario_score} color="#7c3aed" />
+                    <ScoreBadge label="Scenario equity score" value={result.equity.scenario_score} color="#0d9488" />
                   )}
                 </div>
 
@@ -647,9 +666,9 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                   })}
                 </div>
 
-                <div className="rounded-xl bg-violet-50 border border-violet-100 px-3 py-2 text-xs text-violet-700">
+                <div className="rounded-xl bg-teal-50 border border-teal-100 px-3 py-2 text-xs text-teal-700">
                   <p className="font-semibold mb-0.5">Equity score methodology</p>
-                  <p className="text-violet-600 leading-relaxed">
+                  <p className="text-teal-600 leading-relaxed">
                     Time savings weighted by transit dependency and income bracket.
                     Low-income agents have 1.5× weight; high-income 0.5×. Normalised to 100.
                   </p>
@@ -675,7 +694,7 @@ export function SimulationPanel({ customRoutes, onClose, onResults, onAnimate }:
                     ) : (
                       <div className="rounded-xl border border-stone-100 px-3 py-1 divide-y divide-stone-50 max-h-72 overflow-y-auto">
                         {allSegs.map(({ seg, isProposed }, i) => (
-                          <StressBar key={i} segment={seg} isProposed={isProposed} />
+                          <StressBar key={i} segment={seg} isProposed={isProposed} onAskAI={onAskAI} />
                         ))}
                       </div>
                     )}

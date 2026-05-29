@@ -27,6 +27,10 @@ export type ToolStreamChunk =
   | { type: "text"; text: string }
   | { type: "tool"; input: Record<string, unknown> };
 
+export type MapToolStreamChunk =
+  | { type: "text"; delta: string }
+  | { type: "tool_call"; name: string; args: Record<string, unknown> };
+
 export interface AIProvider {
   // Creates a named assistant with a system prompt. Returns an opaque ID.
   createAssistant(name: string, systemPrompt?: string): Promise<string>;
@@ -60,6 +64,14 @@ export interface AIProvider {
     model?: string,
     maxTokens?: number,
   ): AsyncGenerator<ToolStreamChunk, void, unknown>;
+
+  /** Map-assistant mode: multi-tool loop with query_network server-side. */
+  streamMessageWithMapTools?(
+    threadId: string,
+    content: string,
+    model?: string,
+    maxTokens?: number,
+  ): AsyncGenerator<MapToolStreamChunk, void, unknown>;
 
   // Stateless call: pass a system prompt + full message history directly.
   // Used by docs-chat, which manages its own history client-side.
