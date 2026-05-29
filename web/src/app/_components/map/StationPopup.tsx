@@ -131,36 +131,59 @@ export function StationPopup({
       )}
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="h-2.5 w-5 shrink-0 rounded-full"
-            style={{ background: currentRoute?.color ?? "#94a3b8" }}
-          />
-          {isRenaming ? (
-            <input
-              ref={renameInputRef}
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
-              }}
-              className="min-w-0 flex-1 rounded border border-stone-300 bg-white px-1 py-0 text-sm font-semibold text-stone-800 outline-none focus:border-stone-500"
-            />
-          ) : onRename ? (
-            <button
-              onClick={startRename}
-              title="Click to rename"
-              className="group flex min-w-0 items-center gap-1 truncate text-left"
-            >
-              <span className="truncate text-sm font-semibold text-stone-800">{popup.name}</span>
-              <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 shrink-0 text-stone-300 opacity-0 transition-opacity group-hover:opacity-100" fill="currentColor">
-                <path d="M8.5 1.5a1.5 1.5 0 0 1 2.12 2.12L9.5 4.75 7.25 2.5l1.25-1Zm-1.5 1.5L1 9v2h2l6-6.25-1.75-1.75-.25-.25Z"/>
-              </svg>
-            </button>
+          {connectedRoutes.length > 0 ? (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <span
+                className="h-2.5 w-3.5 rounded-l-full"
+                style={{ background: currentRoute?.color ?? "#94a3b8" }}
+              />
+              {connectedRoutes.map((r) => (
+                <span
+                  key={r.id}
+                  className="h-2.5 w-3.5 last:rounded-r-full"
+                  style={{ background: r.color }}
+                />
+              ))}
+            </div>
           ) : (
-            <span className="truncate text-sm font-semibold text-stone-800">{popup.name}</span>
+            <span
+              className="h-2.5 w-5 shrink-0 rounded-full"
+              style={{ background: currentRoute?.color ?? "#94a3b8" }}
+            />
           )}
+          <div className="min-w-0 flex-1">
+            {isRenaming ? (
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                  if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+                }}
+                className="min-w-0 w-full rounded border border-stone-300 bg-white px-1 py-0 text-sm font-semibold text-stone-800 outline-none focus:border-stone-500"
+              />
+            ) : onRename ? (
+              <button
+                onClick={startRename}
+                title="Click to rename"
+                className="group flex min-w-0 items-center gap-1 truncate text-left"
+              >
+                <span className="truncate text-sm font-semibold text-stone-800">{popup.name}</span>
+                <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 shrink-0 text-stone-300 opacity-0 transition-opacity group-hover:opacity-100" fill="currentColor">
+                  <path d="M8.5 1.5a1.5 1.5 0 0 1 2.12 2.12L9.5 4.75 7.25 2.5l1.25-1Zm-1.5 1.5L1 9v2h2l6-6.25-1.75-1.75-.25-.25Z"/>
+                </svg>
+              </button>
+            ) : (
+              <span className="truncate text-sm font-semibold text-stone-800">{popup.name}</span>
+            )}
+            {connectedRoutes.length > 0 && (
+              <p className="mt-0.5 text-[10px] font-medium text-stone-500">
+                Transfer: {[currentRoute, ...connectedRoutes].filter(Boolean).map((r) => `Line ${r!.shortName}`).join(" · ")}
+              </p>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {isDeletable && (

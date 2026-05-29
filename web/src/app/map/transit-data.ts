@@ -321,7 +321,7 @@ export const ROUTES: Route[] = [
     color: "#808080",
     textColor: "#ffffff",
     type: "lrt",
-    description: "LRT line along Finch Ave West from Humber College to Finch West Station, connecting to Line 1.",
+    description: "LRT line along Finch Ave West from Humber College to Finch West Station, where it transfers to Line 1 (Yonge–University) subway.",
     frequency: "Every 5–10 min",
     servicePattern: {
       headwayMinutes: 7,
@@ -348,7 +348,7 @@ export const ROUTES: Route[] = [
       { name: "Driftwood",           coords: [-79.513160, 43.758068] },
       { name: "Tobermory",           coords: [-79.507742, 43.759309] },
       { name: "Sentinel",            coords: [-79.499846, 43.761085] },
-      { name: "Finch West",          coords: [-79.490703, 43.763147] },
+      { name: "Finch West",          coords: [-79.4911, 43.7649] },
     ],
   },
 
