@@ -119,7 +119,11 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
   });
 
   const [input, setInput] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  // Whether new content should auto-stick to the bottom. Flips off when the
+  // user scrolls up to read history, so streaming tokens don't yank them back
+  // down. Re-armed when they scroll back near the bottom (and on send).
+  const stickToBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<InstanceType<SpeechRecognitionConstructor> | null>(null);
@@ -140,13 +144,19 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
   }, [seed]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Follow new content only if the user is parked near the bottom. Scroll the
+    // list's own scrollTop (not scrollIntoView, which can scroll the panel/page
+    // and make the header/composer jump).
+    if (!stickToBottomRef.current) return;
+    const el = messagesRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   const send = async () => {
     const msg = input.trim();
     if (!msg || isLoading) return;
     setInput("");
+    stickToBottomRef.current = true; // always follow the user's own new message
     await sendMessageStreaming(msg, { maxTokens: 900 });
   };
 
@@ -235,7 +245,17 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
           and the input, so the input stays pinned to the bottom of the panel.
           (Previously a max-h-64 cap reserved a fixed 256px block that left a
           large empty gap above the input.) */}
-      <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+      <div
+        ref={messagesRef}
+        onScroll={() => {
+          const el = messagesRef.current;
+          if (!el) return;
+          // Within 40px of the bottom counts as "sticking".
+          stickToBottomRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+        className="flex-1 overflow-y-auto space-y-2 min-h-0"
+      >
         {messages.length === 0 ? (
           // Empty state: a compact top-aligned stack. The panel auto-sizes to
           // this (see AIChatPanel maxHeight), so there's no empty gap to fill.
@@ -336,7 +356,6 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-2 text-xs text-rose-700">{error}</div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* Composer styled after the Claude Code input: one rounded box with the
