@@ -607,7 +607,7 @@ export const ROUTES: Route[] = [
       { name: "Broadview Ave / Millbrook Cres", coords: [-79.354734, 43.671897] },
       { name: "Broadview Ave / Wolfrey Ave", coords: [-79.356904, 43.674192] },
       { name: "Broadview Ave / Danforth Ave", coords: [-79.358601, 43.676051] },
-      { name: "Broadview Station", coords: [-79.358147, 43.677013] },
+      { name: "Broadview",         coords: [-79.3588, 43.6767] },
     ],
   },
   {
@@ -678,7 +678,7 @@ export const ROUTES: Route[] = [
       { name: "Gerrard St East / Norwood Rd", coords: [-79.303202, 43.683235] },
       { name: "Gerrard St East / Main St", coords: [-79.300386, 43.683838] },
       { name: "Main St / Danforth Ave - Danforth GO Station", coords: [-79.301635, 43.688037] },
-      { name: "Main Street Station", coords: [-79.301804, 43.688861] },
+      { name: "Main Street",         coords: [-79.3015, 43.6891] },
     ],
   },
   {
@@ -11494,4 +11494,5 @@ export type PedestrianConnection = {
 
 export const PEDESTRIAN_CONNECTIONS: PedestrianConnection[] = [
   { routeAId: "line-1", stopAName: "Spadina", routeBId: "line-2", stopBName: "Spadina" },
+  { routeAId: "streetcar-510", stopAName: "Spadina Station", routeBId: "line-2", stopBName: "Spadina" },
 ];
