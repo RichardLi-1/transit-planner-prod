@@ -566,7 +566,7 @@ export const ROUTES: Route[] = [
     description: "Streetcar along Dundas St West from Dundas West Loop to Broadview Station.",
     frequency: "Every 5–10 min",
     stops: [
-      { name: "Dundas West Station", coords: [-79.453460, 43.656698] },
+      { name: "Dundas West Station", coords: [-79.453463, 43.656821] },
       { name: "Edna Ave / Dundas St West", coords: [-79.453027, 43.657134] },
       { name: "Dundas St West / Roncesvalles Ave", coords: [-79.451258, 43.653480] },
       { name: "Dundas St West / Howard Park Ave", coords: [-79.448522, 43.652232] },
