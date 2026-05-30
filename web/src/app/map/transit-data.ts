@@ -857,7 +857,7 @@ export const ROUTES: Route[] = [
     description: "Bathurst streetcar from Bathurst Station south to Exhibition Place.",
     frequency: "Every 5–10 min",
     stops: [
-      { name: "Bathurst Station", coords: [-79.411286, 43.666532] },
+      { name: "Bathurst",         coords: [-79.4114, 43.6658] },
       { name: "Bathurst St / Bloor St West", coords: [-79.411347, 43.665235] },
       { name: "Bathurst St / Lennox St", coords: [-79.410809, 43.663902] },
       { name: "Bathurst St / Harbord St", coords: [-79.409887, 43.661614] },
