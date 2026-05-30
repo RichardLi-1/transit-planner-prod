@@ -489,7 +489,7 @@ export const ROUTES: Route[] = [
       { name: "Queen St East / Greenwood Ave", coords: [-79.325493, 43.664281] },
       { name: "Queen St East / Woodfield Rd", coords: [-79.321530, 43.665141] },
       { name: "Queen St East / Emdaabiimok Ave", coords: [-79.316789, 43.666193] },
-      { name: "Queen St East / Kingston Rd", coords: [-79.312890, 43.667119] },
+      { name: "Queen St East / Kingston Rd", coords: [-79.312948, 43.667029] },
       { name: "Kingston Rd / Dixon Ave", coords: [-79.311175, 43.669775] },
       { name: "Kingston Rd / Columbine Ave", coords: [-79.310310, 43.671380] },
       { name: "Kingston Rd / Woodbine Ave", coords: [-79.308088, 43.673673] },
