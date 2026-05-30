@@ -10,6 +10,7 @@ export function StationPopup({
   stationPopulations,
   isDeletable,
   connectedRoutes,
+  pedestrianConnections = [],
   onClose,
   onDelete,
   onDeleteFromAll,
@@ -22,6 +23,7 @@ export function StationPopup({
   stationPopulations: Map<string, number>;
   isDeletable: boolean;
   connectedRoutes: Route[];
+  pedestrianConnections?: { route: Route; stopName: string }[];
   onClose: () => void;
   onDelete: () => void;
   onDeleteFromAll: () => void;
@@ -284,6 +286,24 @@ export function StationPopup({
               </button>
             ))}
           </div>
+        </div>
+      )}
+      {pedestrianConnections.length > 0 && (
+        <div className="mb-2 rounded-lg border border-stone-200 px-2.5 py-2">
+          <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+            <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="6" cy="2" r="1" fill="currentColor" stroke="none"/>
+              <path d="M6 4v3l-1.5 2M6 7l1.5 2M4.5 5.5h3"/>
+            </svg>
+            Same station
+          </p>
+          {pedestrianConnections.map(({ route: r, stopName }) => (
+            <div key={r.id} className="flex items-center gap-1.5 text-xs text-stone-600">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: r.color }} />
+              <span>Line {r.shortName} · {stopName}</span>
+              <span className="ml-auto text-[10px] text-stone-400">by foot</span>
+            </div>
+          ))}
         </div>
       )}
       {onAddTransfer && transferableRoutes.length > 0 && (

@@ -190,7 +190,7 @@ export const ROUTES: Route[] = [
       { name: "Ossington",      coords: [-79.4270, 43.6622] },
       { name: "Christie",       coords: [-79.4181, 43.6643] },
       { name: "Bathurst",       coords: [-79.4114, 43.6658] },
-      { name: "Spadina",        coords: [-79.4050, 43.6697] },
+      { name: "Spadina",        coords: [-79.4048, 43.6671] },
       { name: "St George",      coords: [-79.3988, 43.6684] },
       { name: "Bay",            coords: [-79.3909, 43.6700] },
       { name: "Bloor–Yonge",    coords: [-79.3856, 43.6706] },
@@ -206,7 +206,7 @@ export const ROUTES: Route[] = [
       { name: "Main Street",    coords: [-79.3015, 43.6891] },
       { name: "Victoria Park",  coords: [-79.2887, 43.6949] },
       { name: "Warden",         coords: [-79.2789, 43.7115] },
-      { name: "Kennedy",        coords: [-79.2642, 43.7323] },
+      { name: "Kennedy",        coords: [-79.264480, 43.732791] },
     ],
     // Curves: Victoria Park → Warden → Kennedy bend northeast then north
     shape: [
@@ -242,7 +242,7 @@ export const ROUTES: Route[] = [
       [-79.2836, 43.7032], // curve — bends northeast toward Warden
       [-79.2789, 43.7115], // Warden
       [-79.2716, 43.7219], // curve — continues northeast toward Kennedy
-      [-79.2642, 43.7323], // Kennedy
+      [-79.264480, 43.732791], // Kennedy
     ],
   },
   {
@@ -906,14 +906,14 @@ export const ROUTES: Route[] = [
       { name: "St Clair Ave West / Wychwood Ave", coords: [-79.422895, 43.682189] },
       { name: "St Clair Ave West / Vaughan Rd", coords: [-79.419348, 43.682875] },
       { name: "St Clair Ave West / Bathurst St", coords: [-79.417671, 43.683213] },
-      { name: "St Clair West Station", coords: [-79.415609, 43.684297] },
+      { name: "St Clair West",         coords: [-79.4156, 43.6845] },
       { name: "St Clair Ave West / Tweedsmuir Ave", coords: [-79.413336, 43.684084] },
       { name: "St Clair Ave West / Spadina Rd", coords: [-79.410569, 43.684699] },
       { name: "St Clair Ave West / Russell Hill Rd", coords: [-79.407321, 43.685403] },
       { name: "St Clair Ave West / Dunvegan Rd", coords: [-79.404757, 43.685922] },
       { name: "St Clair Ave West / Avenue Rd", coords: [-79.400882, 43.686666] },
       { name: "St Clair Ave West / Deer Park Cres", coords: [-79.397451, 43.687341] },
-      { name: "St Clair Station", coords: [-79.391958, 43.687857] },
+      { name: "St Clair",         coords: [-79.3933, 43.6881] },
     ],
   },
 ];
@@ -11479,4 +11479,19 @@ export const GO_TRAIN_ROUTES: Route[] = [
       { name: "Old Elm", coords: [-79.237098, 43.990395] },
     ],
   },
+];
+
+// ─── Pedestrian Connections ───────────────────────────────────────────────────
+// Pairs of stops on different routes that are physically the same station
+// but tracked as separate nodes, connected by an in-station walkway.
+
+export type PedestrianConnection = {
+  routeAId: string;
+  stopAName: string;
+  routeBId: string;
+  stopBName: string;
+};
+
+export const PEDESTRIAN_CONNECTIONS: PedestrianConnection[] = [
+  { routeAId: "line-1", stopAName: "Spadina", routeBId: "line-2", stopBName: "Spadina" },
 ];

@@ -47,6 +47,7 @@ export function RoutePanel({
   onAddPortal,
   onClose,
   allRoutes = [],
+  pedestrianConnections = [],
 }: {
   route: Route;
   selectedStop: string | null;
@@ -59,6 +60,7 @@ export function RoutePanel({
   onAddPortal?: () => void;
   onClose: () => void;
   allRoutes?: Route[];
+  pedestrianConnections?: { route: Route; stopName: string }[];
 }) {
   const [snapState, setSnapState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [snapError, setSnapError] = useState<string | null>(null);
@@ -144,6 +146,25 @@ export function RoutePanel({
           Frequency: <span className="text-stone-600">{route.frequency}</span>
         </p>
       </div>
+
+      {pedestrianConnections.length > 0 && (
+        <div className="mx-5 mt-3 rounded-xl border border-stone-200 px-4 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-stone-500">
+            <svg viewBox="0 0 12 12" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="6" cy="2" r="1" fill="currentColor" stroke="none"/>
+              <path d="M6 4v3l-1.5 2M6 7l1.5 2M4.5 5.5h3"/>
+            </svg>
+            Same station — pedestrian walkway
+          </p>
+          {pedestrianConnections.map(({ route: r, stopName }) => (
+            <div key={r.id} className="flex items-center gap-2 text-sm text-stone-700">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: r.color, color: r.textColor }}>{r.shortName}</span>
+              <span>{stopName}</span>
+              <span className="ml-auto text-xs text-stone-400">by foot</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Timetable — opens full page in new tab */}
       <div className="mx-5 mt-4">
