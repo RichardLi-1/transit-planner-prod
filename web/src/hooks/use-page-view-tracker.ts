@@ -36,9 +36,67 @@ export function usePageViewTracker() {
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
+    // ─── Bounce detection ───────────────────────────────────────────────────
+    // A "bounce" = the visitor saw only this one page and left quickly (<10s)
+    // without clicking through anywhere. We check at the moment the page is
+    // unloading. `pagehide` is the reliable "page is going away" signal (covers
+    // both tab close and navigation away).
+    // 📖 Learn: Page Lifecycle API — https://developer.chrome.com/docs/web-platform/page-lifecycle-api
+    const BOUNCE_THRESHOLD_MS = 10_000; // under 10s on a single page = a bounce
+    const pageEnteredAt = Date.now();
+
+    const reportBounceOnExit = () => {
+      // Same skip rules as the page-view tracker so we stay consistent.
+      if (slashKeyHeld.current) return;
+      if (window.location.hostname === "localhost") return;
+      // test.<domain> is our staging subdomain — never report its traffic.
+      if (window.location.hostname.startsWith("test.")) return;
+      if (localStorage.getItem("skip_tracking")) return;
+      if (/bot|crawler|spider/i.test(navigator.userAgent)) return;
+
+      // Only a bounce if they never left this first page…
+      const stored = sessionStorage.getItem("nav_path");
+      const pages: string[] = stored ? (JSON.parse(stored) as string[]) : [];
+      if (pages.length > 1) return;
+      // …and they left quickly.
+      const elapsed = Date.now() - pageEnteredAt;
+      if (elapsed > BOUNCE_THRESHOLD_MS) return;
+      // Fire at most once per visit.
+      if (sessionStorage.getItem("bounce_sent")) return;
+      sessionStorage.setItem("bounce_sent", "1");
+
+      const seconds = Math.round(elapsed / 1000);
+      // Carry the referral so we still know where the bouncer came from.
+      const referral = localStorage.getItem("referral_source");
+      const payload = {
+        event: referral
+          ? `👋 Quick bounce from **${referral}** on ${window.location.pathname}`
+          : `👋 Quick bounce on ${window.location.pathname}`,
+        meta: {
+          "🛤️ Path": pages.join(" → ") || window.location.pathname,
+          "🔗 URL": window.location.href,
+          "⏱️ Time on page": `${seconds}s`,
+          "🕒 Time": new Date().toLocaleString(),
+        },
+      };
+
+      // sendBeacon queues the request so it survives the page unload — a normal
+      // fetch() gets cancelled when the page is tearing down. The Blob's JSON
+      // type lets /api/track's req.json() parse it server-side.
+      // 📖 Learn: navigator.sendBeacon — https://developer.mozilla.org/en-US/docs/Web/API/Navigator/sendBeacon
+      navigator.sendBeacon(
+        "/api/track",
+        new Blob([JSON.stringify(payload)], { type: "application/json" }),
+      );
+    };
+
+    window.addEventListener("pagehide", reportBounceOnExit);
+
     const sendVisit = () => {
       if (slashKeyHeld.current) return;
       if (window.location.hostname === "localhost") return;
+      // test.<domain> is our staging subdomain — never report its traffic.
+      if (window.location.hostname.startsWith("test.")) return;
       if (localStorage.getItem("skip_tracking")) return;
 
       // Only track once per page load.
@@ -74,16 +132,28 @@ export function usePageViewTracker() {
       sessionStorage.setItem("nav_path", JSON.stringify(pathHistory));
       const pathTrail = pathHistory.join(" → ");
 
+      // Capture the full URL *before* we strip params below, so the logged URL
+      // reflects exactly what the visitor landed on (referral params included).
+      const fullUrl = window.location.href;
+
       // Read ?param, look it up in REFERRAL_SOURCES, then strip all params so
       // the URL bar stays clean. replaceState rewrites the URL without a reload
       // and without adding a history entry (back button unaffected).
       // 📖 Learn: history.replaceState — https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState
       const params = new URLSearchParams(window.location.search);
       const rawParams = params.toString();
-      let referralSource: string | null = null;
+      // Referral sticks for the whole visit (and future visits): we persist it in
+      // localStorage and fall back to the stored value when the current URL has no
+      // param — so a page view on a later page still reports the original source.
+      // A fresh referral param always wins and overwrites the stored one.
+      // localStorage (not sessionStorage) → survives new tabs and return visits.
+      // 📖 Learn: Web Storage API — https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage
+      const REFERRAL_KEY = "referral_source";
+      let referralSource: string | null = localStorage.getItem(REFERRAL_KEY);
       for (const key of params.keys()) {
         if (REFERRAL_SOURCES[key]) {
           referralSource = REFERRAL_SOURCES[key];
+          localStorage.setItem(REFERRAL_KEY, referralSource); // new param overwrites old
           break;
         }
       }
@@ -105,6 +175,7 @@ export function usePageViewTracker() {
       trackVisit(eventLabel, {
         "🖥️ Device": `${deviceType} · ${platform}`,
         "🛤️ Path": pathTrail,
+        "🔗 URL": fullUrl,
         "🕒 Time": new Date().toLocaleString(),
         ...(rawParams ? { "🔗 Params": `?${rawParams}` } : {}),
         ...(isBot ? { "🔍 UA": ua } : {}),
@@ -116,6 +187,7 @@ export function usePageViewTracker() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("pagehide", reportBounceOnExit);
     };
   }, []);
 }

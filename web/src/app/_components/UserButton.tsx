@@ -34,7 +34,7 @@ export function UserButton() {
           className="h-6 w-6 rounded-full object-cover"
         />
       ) : (
-        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-100 text-xs font-semibold text-teal-600">
+        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600">
           {(user.name ?? user.email ?? "U")[0]?.toUpperCase()}
         </div>
       )}

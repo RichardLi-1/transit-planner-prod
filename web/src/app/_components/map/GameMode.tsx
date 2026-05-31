@@ -307,7 +307,7 @@ export function GameMode({ routes: _routes, onClose }: Props) {
             <button
               onClick={advanceYear}
               disabled={!!gs.activeEvent}
-              className="rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-40 px-3 py-1 text-[11px] font-bold text-white transition-colors"
+              className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-1 text-[11px] font-bold text-white transition-colors"
             >
               Advance Year →
             </button>

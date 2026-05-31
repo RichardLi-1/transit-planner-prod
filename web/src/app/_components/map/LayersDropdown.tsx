@@ -190,7 +190,7 @@ export function LayersDropdown({ overlays, pinned, onTogglePin, actions = [] }: 
                           aria-label={isPinned ? "Unpin from toolbar" : "Pin to toolbar"}
                           className={`shrink-0 rounded-md p-1 transition-colors ${
                             isPinned
-                              ? "text-teal-600 hover:bg-teal-50"
+                              ? "text-indigo-600 hover:bg-indigo-50"
                               : "text-stone-300 opacity-0 group-hover:opacity-100 hover:text-stone-600"
                           }`}
                         >

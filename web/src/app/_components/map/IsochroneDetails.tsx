@@ -49,7 +49,7 @@ export function IsochroneDetails({
         onClick={onStartPickIsochroneOrigin}
         className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors ${
           pickingIsochroneOrigin
-            ? "border-teal-400 bg-teal-50 text-teal-700"
+            ? "border-indigo-400 bg-indigo-50 text-indigo-700"
             : "border-stone-200 bg-white text-stone-600 hover:border-stone-300"
         }`}
       >
@@ -94,7 +94,7 @@ export function IsochroneDetails({
             onClick={() => onSetIsoMode(m)}
             className={`flex-1 rounded-md border px-1.5 py-1 text-[10px] font-medium capitalize transition-colors ${
               isoMode === m
-                ? "border-teal-400 bg-teal-50 text-teal-700"
+                ? "border-indigo-400 bg-indigo-50 text-indigo-700"
                 : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
             }`}
           >
@@ -116,20 +116,20 @@ export function IsochroneDetails({
           step={5}
           value={isochroneMinutes}
           onChange={(e) => onSetIsochroneMinutes(Number(e.target.value))}
-          className="mt-0.5 w-full accent-teal-500"
+          className="mt-0.5 w-full accent-indigo-500"
         />
       </div>
 
       {/* Status row + clear */}
       {isochroneOrigin ? (
-        <div className="flex items-center justify-between rounded-md bg-teal-50 px-2 py-1.5">
-          <span className="text-[10px] font-semibold text-teal-700">
+        <div className="flex items-center justify-between rounded-md bg-indigo-50 px-2 py-1.5">
+          <span className="text-[10px] font-semibold text-indigo-700">
             <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: TIME_COLORS[Math.min(60, isochroneMinutes) as 15 | 30 | 45 | 60] ?? "#7c3aed" }} />
             <span className="ml-1.5">Showing {isochroneMinutes} min {isoMode}</span>
           </span>
           <button
             onClick={() => { setIsoOriginId(""); onSetIsochroneOrigin(null); }}
-            className="text-[10px] text-teal-500 hover:text-teal-700"
+            className="text-[10px] text-indigo-500 hover:text-indigo-700"
           >
             Clear
           </button>
