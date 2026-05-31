@@ -131,28 +131,10 @@ export function StationPopup({
           <div className="absolute left-1/2 -bottom-[5px] -translate-x-1/2 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent" style={{ borderTopColor: "#ffffff" }} />
         </>
       )}
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {connectedRoutes.length > 0 ? (
-            <div className="flex shrink-0 items-center gap-0.5">
-              <span
-                className="h-2.5 w-3.5 rounded-l-full"
-                style={{ background: currentRoute?.color ?? "#94a3b8" }}
-              />
-              {connectedRoutes.map((r) => (
-                <span
-                  key={r.id}
-                  className="h-2.5 w-3.5 last:rounded-r-full"
-                  style={{ background: r.color }}
-                />
-              ))}
-            </div>
-          ) : (
-            <span
-              className="h-2.5 w-5 shrink-0 rounded-full"
-              style={{ background: currentRoute?.color ?? "#94a3b8" }}
-            />
-          )}
+      {/* Title + action buttons get their own full-width row so the route
+          color bar below can never squeeze the station name into wrapping. */}
+      <div className="mb-2">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             {isRenaming ? (
               <input
@@ -186,25 +168,47 @@ export function StationPopup({
               </p>
             )}
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {isDeletable && (
-            <button
-              onClick={() => connectedRoutes.length > 0 ? setDeleteConfirm(true) : onDelete()}
-              title="Remove station"
-              className="rounded p-0.5 text-stone-300 hover:bg-red-50 hover:text-red-400 transition-colors"
-            >
-              <svg viewBox="0 0 14 14" className="h-3.5 w-3.5" fill="currentColor">
-                <path fillRule="evenodd" d="M6 1a1.75 1.75 0 0 0-1.736 1.502H2.75a.75.75 0 0 0 0 1.5h.148l.465 6.52A1.75 1.75 0 0 0 5.11 12h3.78a1.75 1.75 0 0 0 1.747-1.478l.465-6.52h.148a.75.75 0 0 0 0-1.5H9.736A1.75 1.75 0 0 0 8 1H6Zm1 1.5a.25.25 0 0 0-.247.215L6.5 2.5h1l-.253-.285A.25.25 0 0 0 7 2.5Zm-1.5 3a.5.5 0 0 1 1 0l-.2 4a.3.3 0 0 1-.6 0l-.2-4Zm2.5 0a.5.5 0 0 1 1 0l-.2 4a.3.3 0 0 1-.6 0l-.2-4Z" clipRule="evenodd"/>
+          <div className="flex shrink-0 items-center gap-1">
+            {isDeletable && (
+              <button
+                onClick={() => connectedRoutes.length > 0 ? setDeleteConfirm(true) : onDelete()}
+                title="Remove station"
+                className="rounded p-0.5 text-stone-300 hover:bg-red-50 hover:text-red-400 transition-colors"
+              >
+                <svg viewBox="0 0 14 14" className="h-3.5 w-3.5" fill="currentColor">
+                  <path fillRule="evenodd" d="M6 1a1.75 1.75 0 0 0-1.736 1.502H2.75a.75.75 0 0 0 0 1.5h.148l.465 6.52A1.75 1.75 0 0 0 5.11 12h3.78a1.75 1.75 0 0 0 1.747-1.478l.465-6.52h.148a.75.75 0 0 0 0-1.5H9.736A1.75 1.75 0 0 0 8 1H6Zm1 1.5a.25.25 0 0 0-.247.215L6.5 2.5h1l-.253-.285A.25.25 0 0 0 7 2.5Zm-1.5 3a.5.5 0 0 1 1 0l-.2 4a.3.3 0 0 1-.6 0l-.2-4Zm2.5 0a.5.5 0 0 1 1 0l-.2 4a.3.3 0 0 1-.6 0l-.2-4Z" clipRule="evenodd"/>
+                </svg>
+              </button>
+            )}
+            <button onClick={onClose} className="text-stone-400 hover:text-stone-600">
+              <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M1 1l10 10M11 1L1 11"/>
               </svg>
             </button>
-          )}
-          <button onClick={onClose} className="text-stone-400 hover:text-stone-600">
-            <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M1 1l10 10M11 1L1 11"/>
-            </svg>
-          </button>
+          </div>
         </div>
+        {/* Route color bar on its own row — flex-wrap so many routes wrap
+            to a second line instead of growing wider and pushing text. */}
+        {connectedRoutes.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-0.5">
+            <span
+              className="h-2.5 w-3.5 rounded-l-full"
+              style={{ background: currentRoute?.color ?? "#94a3b8" }}
+            />
+            {connectedRoutes.map((r) => (
+              <span
+                key={r.id}
+                className="h-2.5 w-3.5 last:rounded-r-full"
+                style={{ background: r.color }}
+              />
+            ))}
+          </div>
+        ) : (
+          <span
+            className="mt-1.5 inline-block h-2.5 w-5 rounded-full"
+            style={{ background: currentRoute?.color ?? "#94a3b8" }}
+          />
+        )}
       </div>
 
       {/* AI Summary Section */}

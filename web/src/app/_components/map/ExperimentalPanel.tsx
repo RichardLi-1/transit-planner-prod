@@ -350,7 +350,7 @@ function openReportTab(route: Route, allRoutes: Route[]): void {
   @keyframes progress{from{width:0}to{width:100%}}
   .label{font-size:14px;color:#94a3b8;margin-bottom:20px;letter-spacing:.5px}
   .track{width:280px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden}
-  .bar{height:100%;background:linear-gradient(90deg,#0d9488,#06b6d4);border-radius:4px;animation:progress 1.1s cubic-bezier(.4,0,.2,1) forwards}
+  .bar{height:100%;background:linear-gradient(90deg,#6366f1,#06b6d4);border-radius:4px;animation:progress 1.1s cubic-bezier(.4,0,.2,1) forwards}
   .title{font-size:22px;font-weight:800;margin-bottom:8px}
 </style>
 </head>
@@ -665,23 +665,23 @@ export function ExperimentalPanel({
   const FEATURES: { id: Tab; label: string; icon: string; desc: string; accent: string }[] = [
     { id: "stats",     label: "Network Stats",    icon: "◈", desc: "Routes, stops, headways",       accent: "text-sky-600"     },
     { id: "cities",    label: "City Coverage",    icon: "◎", desc: "Population centers served",     accent: "text-emerald-600" },
-    { id: "score",     label: "Route Score",      icon: "◆", desc: "Grade selected route",          accent: "text-teal-600"  },
+    { id: "score",     label: "Route Score",      icon: "◆", desc: "Grade selected route",          accent: "text-indigo-600"  },
     { id: "issues",    label: "Network Issues",   icon: "⚠", desc: "Gaps, warnings, hubs",          accent: "text-amber-600"   },
     { id: "vs",        label: "Compare Routes",   icon: "⇌", desc: "Side-by-side scorecard",        accent: "text-sky-600"     },
-    { id: "sim",       label: "Simulation",        icon: "◷", desc: "Service by hour of day",        accent: "text-teal-600"  },
-    { id: "access",    label: "Accessibility",    icon: "♿", desc: "Spacing & inclusive access",    accent: "text-teal-600"    },
+    { id: "sim",       label: "Simulation",        icon: "◷", desc: "Service by hour of day",        accent: "text-indigo-600"  },
+    { id: "access",    label: "Accessibility",    icon: "♿", desc: "Spacing & inclusive access",    accent: "text-indigo-600"    },
     { id: "report",    label: "Feasibility Doc",  icon: "◉", desc: "Auto-generate analysis PDF",    accent: "text-rose-600"    },
     { id: "stock",     label: "Rolling Stock",    icon: "◈", desc: "Fleet & vehicle info",          accent: "text-stone-600"   },
-    { id: "station",   label: "Station Design",   icon: "◫", desc: "Style & property footprint",    accent: "text-teal-600"  },
+    { id: "station",   label: "Station Design",   icon: "◫", desc: "Style & property footprint",    accent: "text-indigo-600"  },
     { id: "property",  label: "Land Acquisition", icon: "◰", desc: "Properties along corridor",     accent: "text-amber-600"   },
     { id: "places",    label: "Jump to Place",    icon: "◎", desc: "Fly to city presets",           accent: "text-sky-600"     },
     { id: "cost",      label: "Cost Estimator",   icon: "◆", desc: "Capital & operating costs",     accent: "text-emerald-600" },
     { id: "gaps",      label: "Network Gaps",     icon: "◍", desc: "Unserved population centres",   accent: "text-rose-600"    },
     { id: "catchment", label: "Catchment Zones",  icon: "◎", desc: "Station radius overlay",        accent: "text-emerald-600" },
     { id: "export",    label: "Export Data",      icon: "↓",  desc: "CSV & Markdown downloads",      accent: "text-stone-600"   },
-    { id: "elevation", label: "Elevation Profile",icon: "◬", desc: "Terrain height along route",    accent: "text-teal-600"    },
+    { id: "elevation", label: "Elevation Profile",icon: "◬", desc: "Terrain height along route",    accent: "text-indigo-600"    },
     { id: "disruption",label: "Disruption Zones", icon: "◯", desc: "Noise & impact buffers",        accent: "text-rose-600"    },
-    { id: "ridership", label: "Ridership Forecast",icon:"◈", desc: "Gravity model projections",     accent: "text-teal-600"  },
+    { id: "ridership", label: "Ridership Forecast",icon:"◈", desc: "Gravity model projections",     accent: "text-indigo-600"  },
     { id: "assistant", label: "AI Assistant",      icon:"✦", desc: "Chat with your network data",   accent: "text-teal-600"  },
   ];
 
@@ -693,7 +693,7 @@ export function ExperimentalPanel({
       <button onClick={() => { setOpen((v) => !v); if (open) setTab(null); }} className="flex w-full items-center justify-between px-4 py-3 text-left shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-stone-400 uppercase tracking-widest">Tools</span>
-          <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[9px] font-bold text-teal-600 uppercase tracking-wide">beta</span>
+          <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-600 uppercase tracking-wide">beta</span>
         </div>
         <svg viewBox="0 0 10 10" fill="currentColor" className={`h-2.5 w-2.5 text-stone-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}>
           <path d="M2 3l3 4 3-4H2z" />
@@ -736,11 +736,11 @@ export function ExperimentalPanel({
                 {onOpenGameMode && (
                   <button
                     onClick={onOpenGameMode}
-                    className="text-left rounded-xl border border-teal-100 bg-teal-50 px-2.5 py-2.5 hover:border-teal-200 hover:bg-teal-50/80 transition-all group"
+                    className="text-left rounded-xl border border-indigo-100 bg-indigo-50 px-2.5 py-2.5 hover:border-indigo-200 hover:bg-indigo-50/80 transition-all group"
                   >
                     <span className="text-base leading-none">🎮</span>
-                    <p className="mt-1 text-[11px] font-semibold text-teal-700 leading-tight">Game Mode</p>
-                    <p className="mt-0.5 text-[9px] text-teal-400 leading-tight">Interactive planning game</p>
+                    <p className="mt-1 text-[11px] font-semibold text-indigo-700 leading-tight">Game Mode</p>
+                    <p className="mt-0.5 text-[9px] text-indigo-400 leading-tight">Interactive planning game</p>
                   </button>
                 )}
               </div>
@@ -899,7 +899,7 @@ export function ExperimentalPanel({
                         <div key={h.name} className="rounded-lg bg-stone-50 border border-stone-100 px-2.5 py-2">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-[11px] font-semibold text-stone-700 truncate flex-1">{h.name}</p>
-                            <Pill color="bg-teal-100 text-teal-700">{h.routeCount} lines</Pill>
+                            <Pill color="bg-indigo-100 text-indigo-700">{h.routeCount} lines</Pill>
                           </div>
                           <p className="text-[10px] text-stone-400 mt-0.5 truncate">{h.routeNames.slice(0, 3).join(" · ")}</p>
                         </div>
@@ -987,7 +987,7 @@ export function ExperimentalPanel({
                       <span className="text-xs font-bold text-stone-700">{hourLabel(simHour)}</span>
                       <button
                         onClick={() => setSimPlaying((v) => !v)}
-                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${simPlaying ? "bg-teal-500 text-white" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
+                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${simPlaying ? "bg-indigo-500 text-white" : "bg-stone-100 text-stone-500 hover:bg-stone-200"}`}
                         title={simPlaying ? "Pause" : "Play"}
                       >
                         {simPlaying ? (
@@ -998,14 +998,14 @@ export function ExperimentalPanel({
                       </button>
                     </div>
                   </div>
-                  <input type="range" min={0} max={23} step={1} value={simHour} onChange={(e) => { setSimPlaying(false); setSimHour(Number(e.target.value)); }} className="w-full accent-teal-500" />
+                  <input type="range" min={0} max={23} step={1} value={simHour} onChange={(e) => { setSimPlaying(false); setSimHour(Number(e.target.value)); }} className="w-full accent-indigo-500" />
                   {/* 24hr bar chart */}
                   <div className="flex items-end gap-px mt-2 h-8">
                     {simBars.map((count, h) => (
                       <div
                         key={h}
                         title={`${hourLabel(h)}: ${count} routes`}
-                        className={`flex-1 rounded-sm transition-colors ${h === simHour ? "bg-teal-500" : "bg-stone-200 hover:bg-stone-300"}`}
+                        className={`flex-1 rounded-sm transition-colors ${h === simHour ? "bg-indigo-500" : "bg-stone-200 hover:bg-stone-300"}`}
                         style={{ height: `${Math.max(8, (count / maxBar) * 100)}%` }}
                       />
                     ))}
@@ -1233,7 +1233,7 @@ export function ExperimentalPanel({
                               <p className="text-[10px] font-semibold text-stone-700 truncate">{s.name}</p>
                               <p className="text-[9px] text-stone-400">{landM2.toLocaleString()} m² · {isTerminus ? "terminus" : isPortal ? "portal" : "station"}</p>
                             </div>
-                            <Pill color={isTerminus ? "bg-teal-100 text-teal-700" : isPortal ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-500"}>
+                            <Pill color={isTerminus ? "bg-indigo-100 text-indigo-700" : isPortal ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-500"}>
                               {isTerminus ? "terminus" : isPortal ? "portal" : "station"}
                             </Pill>
                           </div>
@@ -1285,14 +1285,14 @@ export function ExperimentalPanel({
                       {([["Underground %", tunnelPct, (v: number) => setTunnelPct(Math.min(v, 100 - elevatedPct))], ["Elevated %", elevatedPct, (v: number) => setElevatedPct(Math.min(v, 100 - tunnelPct))]] as [string, number, (v: number) => void][]).map(([label, val, set]) => (
                         <div key={label}>
                           <div className="flex justify-between text-[10px] text-stone-500 mb-0.5"><span>{label}</span><span className="font-semibold">{val}%</span></div>
-                          <input type="range" min={0} max={100} value={val} onChange={(e) => set(Number(e.target.value))} className="w-full accent-teal-500" />
+                          <input type="range" min={0} max={100} value={val} onChange={(e) => set(Number(e.target.value))} className="w-full accent-indigo-500" />
                         </div>
                       ))}
                       <div className="flex justify-between text-[10px] text-stone-400"><span>At-grade / surface</span><span>{costBreakdown.surfacePct}%</span></div>
                     </div>
                     <div className="rounded-lg bg-stone-50 px-2.5 py-2 space-y-1">
                       <div className="flex justify-between text-xs"><span className="text-stone-500">Route length</span><span className="font-semibold text-stone-800">{costBreakdown.totalKm.toFixed(1)} km</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-stone-500">Capital cost</span><span className="font-bold text-teal-700">${costBreakdown.capitalM >= 1000 ? `${(costBreakdown.capitalM / 1000).toFixed(2)}B` : `${costBreakdown.capitalM.toFixed(0)}M`}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-stone-500">Capital cost</span><span className="font-bold text-indigo-700">${costBreakdown.capitalM >= 1000 ? `${(costBreakdown.capitalM / 1000).toFixed(2)}B` : `${costBreakdown.capitalM.toFixed(0)}M`}</span></div>
                       <div className="flex justify-between text-xs"><span className="text-stone-500">Annual operating</span><span className="font-semibold text-stone-800">~${costBreakdown.operatingM.toFixed(1)}M/yr</span></div>
                     </div>
                   </>
@@ -1569,7 +1569,7 @@ export function ExperimentalPanel({
                           <span className="text-stone-800 font-semibold shrink-0">{(daily / 1000).toFixed(1)}k/day</span>
                         </div>
                         <div className="h-1 rounded-full bg-stone-100 overflow-hidden">
-                          <div className="h-full rounded-full bg-teal-400" style={{ width: `${(daily / maxD) * 100}%` }} />
+                          <div className="h-full rounded-full bg-indigo-400" style={{ width: `${(daily / maxD) * 100}%` }} />
                         </div>
                       </div>
                     );

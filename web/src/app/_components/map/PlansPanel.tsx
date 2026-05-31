@@ -224,7 +224,7 @@ export function PlansPanel({
                         <div
                           className={`group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors ${
                             isActive
-                              ? "bg-teal-50 dark:bg-teal-500/10"
+                              ? "bg-indigo-50 dark:bg-indigo-500/10"
                               : "hover:bg-stone-50 dark:hover:bg-white/5"
                           }`}
                         >
@@ -234,7 +234,7 @@ export function PlansPanel({
                               isActive
                                 ? planIsDirty
                                   ? "bg-amber-400"
-                                  : "bg-teal-500"
+                                  : "bg-indigo-500"
                                 : "bg-stone-200 dark:bg-stone-600"
                             }`}
                           />
@@ -244,7 +244,7 @@ export function PlansPanel({
                             {isEditing ? (
                               <input
                                 autoFocus
-                                className="w-full rounded border border-stone-200 bg-white px-1.5 py-0.5 text-sm text-stone-800 outline-none focus:border-teal-400 dark:border-white/10 dark:bg-[#28282a] dark:text-white"
+                                className="w-full rounded border border-stone-200 bg-white px-1.5 py-0.5 text-sm text-stone-800 outline-none focus:border-indigo-400 dark:border-white/10 dark:bg-[#28282a] dark:text-white"
                                 value={editingName}
                                 onChange={(e) => setEditingName(e.target.value)}
                                 onBlur={() => void handleRenameCommit(plan.id)}
@@ -258,7 +258,7 @@ export function PlansPanel({
                                 <button
                                   onClick={() => void handleLoad(plan.id)}
                                   disabled={isActing}
-                                  className="block max-w-full truncate text-left text-sm font-medium text-stone-700 transition-colors hover:text-teal-600 disabled:opacity-50 dark:text-stone-200 dark:hover:text-teal-400"
+                                  className="block max-w-full truncate text-left text-sm font-medium text-stone-700 transition-colors hover:text-indigo-600 disabled:opacity-50 dark:text-stone-200 dark:hover:text-indigo-400"
                                   title={plan.name}
                                 >
                                   {plan.name}
@@ -336,7 +336,7 @@ export function PlansPanel({
                   disabled={isSaving}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all disabled:opacity-50 ${
                     planIsDirty && currentPlanId
-                      ? "bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-400"
+                      ? "bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
                       : "bg-stone-900 text-white hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-100"
                   }`}
                 >

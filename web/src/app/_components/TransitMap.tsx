@@ -21,6 +21,7 @@ import { StationPopup } from "./map/StationPopup";
 import { NewLineModal } from "./map/NewLineModal";
 import { ExperimentalPanel } from "./map/ExperimentalPanel";
 import { LayersDropdown, type OverlaySpec, type ActionRow } from "./map/LayersDropdown";
+import { OVERLAY_ICONS } from "./map/overlay-icons";
 import { IsochroneDetails } from "./map/IsochroneDetails";
 import { AIChatPanel } from "./map/AIChatPanel";
 import {
@@ -1943,25 +1944,25 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           id: "gl-draw-polygon-fill",
           type: "fill",
           filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
-          paint: { "fill-color": "#0d9488", "fill-opacity": 0.1 },
+          paint: { "fill-color": "#6366f1", "fill-opacity": 0.1 },
         },
         {
           id: "gl-draw-polygon-stroke",
           type: "line",
           filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
-          paint: { "line-color": "#0d9488", "line-width": 2, "line-dasharray": [3, 2] },
+          paint: { "line-color": "#6366f1", "line-width": 2, "line-dasharray": [3, 2] },
         },
         {
           id: "gl-draw-point-outer",
           type: "circle",
           filter: ["all", ["==", "$type", "Point"], ["==", "meta", "vertex"]],
-          paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#0d9488", "circle-stroke-width": 2 },
+          paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#6366f1", "circle-stroke-width": 2 },
         },
         {
           id: "gl-draw-point-midpoint",
           type: "circle",
           filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
-          paint: { "circle-radius": 3, "circle-color": "#0d9488" },
+          paint: { "circle-radius": 3, "circle-color": "#6366f1" },
         },
       ],
     });
@@ -2020,7 +2021,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               ["boolean", ["feature-state", "brief"], false],
               "#c2410c",
               ["boolean", ["feature-state", "selected"], false],
-              "#0d9488",
+              "#6366f1",
               "#94a3b8",
             ],
             "fill-opacity": [
@@ -2049,7 +2050,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               ["boolean", ["feature-state", "brief"], false],
               "#ea580c",
               ["boolean", ["feature-state", "selected"], false],
-              "#0d9488",
+              "#6366f1",
               "#94a3b8",
             ],
             "line-width": [
@@ -2979,48 +2980,55 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     if (map.getLayer(PIN_LABEL)) map.removeLayer(PIN_LABEL);
     if (map.getLayer(PIN_LAYER)) map.removeLayer(PIN_LAYER);
 
-    map.addLayer(
-      {
-        id: PIN_LAYER,
-        type: "circle",
-        source: PIN_SRC,
-        paint: {
-          "circle-radius": 7,
-          "circle-color": ["get", "color"],
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 2,
-        },
+    // The pin dot + pill label are added with NO beforeId, so they land on
+    // TOP of every other layer. These are AI annotations the user explicitly
+    // asked to see, so they must always sit above the route lines.
+    //
+    // Earlier they were inserted at `beforeId: neighbourhood-fill`, which put
+    // them BELOW the route lines whenever that layer already existed. Because
+    // `beforeId` is only set when neighbourhood-fill is present at run time,
+    // the result was nondeterministic: pills drawn mid-session (layer present)
+    // were buried under the lines, but after a refresh (effect runs before the
+    // neighbourhood layer exists → beforeId undefined → added on top) they
+    // looked correct. Omitting beforeId removes that timing dependency.
+    // 📖 Learn: addLayer(layer) with no beforeId appends to the very top;
+    //   addLayer(layer, beforeId) inserts directly *below* beforeId.
+    map.addLayer({
+      id: PIN_LAYER,
+      type: "circle",
+      source: PIN_SRC,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": ["get", "color"],
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 2,
       },
-      beforeId,
-    );
-    map.addLayer(
-      {
-        id: PIN_LABEL,
-        type: "symbol",
-        source: PIN_SRC,
-        layout: {
-          // The pill background wraps the text (icon-text-fit "both"), so we
-          // get a solid rounded chip instead of bare text fighting the map.
-          "icon-image": PILL_IMG,
-          "icon-text-fit": "both",
-          "icon-text-fit-padding": [1, 4, 1, 4],
-          "icon-allow-overlap": true,
-          "text-field": ["get", "note"],
-          "text-size": 10.5,
-          "text-max-width": 12,
-          // Always ABOVE the pin (deterministic — not collision-driven).
-          // text-anchor "bottom" puts the label's BOTTOM edge at the point,
-          // so it rises upward; negative Y offset lifts it clear of the dot.
-          "text-anchor": "bottom",
-          "text-offset": [0, -1.2],
-          "text-allow-overlap": true,
-        },
-        paint: {
-          "text-color": darkMode ? "#f5f5f4" : "#292524",
-        },
+    });
+    map.addLayer({
+      id: PIN_LABEL,
+      type: "symbol",
+      source: PIN_SRC,
+      layout: {
+        // The pill background wraps the text (icon-text-fit "both"), so we
+        // get a solid rounded chip instead of bare text fighting the map.
+        "icon-image": PILL_IMG,
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [1, 4, 1, 4],
+        "icon-allow-overlap": true,
+        "text-field": ["get", "note"],
+        "text-size": 10.5,
+        "text-max-width": 12,
+        // Always ABOVE the pin (deterministic — not collision-driven).
+        // text-anchor "bottom" puts the label's BOTTOM edge at the point,
+        // so it rises upward; negative Y offset lifts it clear of the dot.
+        "text-anchor": "bottom",
+        "text-offset": [0, -1.2],
+        "text-allow-overlap": true,
       },
-      beforeId,
-    );
+      paint: {
+        "text-color": darkMode ? "#f5f5f4" : "#292524",
+      },
+    });
   }, [aiAnnotations, aiAnnotationsVisible, mapLoaded, darkMode]);
 
   // ── AI annotation editing: draggable vertex handles ─────────────────────────
@@ -3709,6 +3717,48 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       map.on("mouseenter", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = ""; });
     });
+
+    // ── Re-stack route layers relative to the basemap + each other ──────────
+    // Layers are inserted per-route in a loop, and Mapbox draws strictly in
+    // insertion order (no layer groups). Two problems fell out of that:
+    //   1. The dark station "pills" in the basemap (e.g. "Union (Subway)") were
+    //      being painted OVER by our coloured route lines, because the lines are
+    //      added on top of the whole basemap (no beforeId). Fix: drop the line
+    //      layers BELOW the basemap's label layers so the pills sit on top.
+    //   2. A route added later painted its line over an EARLIER route's dots,
+    //      so crossing lines hid stop dots/labels. Fix: lift our markers to top.
+    // 📖 Learn: moveLayer(id, beforeId) puts `id` directly below `beforeId`;
+    //   moveLayer(id) with no beforeId lifts it to the very top.
+    //   https://docs.mapbox.com/mapbox-gl-js/api/map/#map#movelayer
+
+    // The basemap's lowest text layer — inserting below it = below ALL basemap
+    // labels (street names, place names, and the transit-station pills).
+    const firstLabelLayer = map
+      .getStyle()
+      ?.layers?.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown>)?.["text-field"])?.id;
+
+    if (firstLabelLayer && map.getLayer(firstLabelLayer)) {
+      // Build the desired bottom→top stack for ALL of our route layers, then
+      // move each one to sit directly below the basemap labels. Because each
+      // moveLayer(id, firstLabelLayer) call drops `id` just under that label
+      // layer (above whatever we moved previously), calling them in this order
+      // reproduces the stack exactly — and ALL of it ends up beneath the
+      // basemap pills, so nothing of ours (lines OR dots) covers a pill.
+      //   grouped by type across routes so no route's line hides another
+      //   route's dots: every line sits below every dot.
+      const lineIds = routes.flatMap((r) => [`route-shadow-${r.id}`, `route-outline-${r.id}`, `route-line-${r.id}`, `route-shimmer-${r.id}`, `underground-line-${r.id}`]);
+      const dotIds = routes.flatMap((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`]);
+      const labelIds = routes.map((r) => `stops-label-${r.id}`);
+      [...lineIds, ...dotIds, ...labelIds].forEach((id) => {
+        if (map.getLayer(id)) map.moveLayer(id, firstLabelLayer);
+      });
+    } else {
+      // Fallback (basemap label layer not found): can't sit below the pills,
+      // so at least keep dots/labels above lines to fix the crossing-line bug.
+      const raise = (id: string) => { if (map.getLayer(id)) map.moveLayer(id); };
+      routes.forEach((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`].forEach(raise));
+      routes.forEach((r) => raise(`stops-label-${r.id}`));
+    }
   }, [routes, mapLoaded]);
 
   // ── drag-to-reposition stops while in edit mode
@@ -4160,21 +4210,21 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {/* Add-station notification — below top-center toolbar */}
       {addStationToLine && (
         <div className="pointer-events-none absolute top-[85px] left-0 right-0 flex justify-center">
-          <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-teal-200 dark:border-teal-700 bg-teal-100 shadow-sm">
-            <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-teal-700 dark:text-teal-200">
+          <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-100 shadow-sm">
+            <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-indigo-700 dark:text-indigo-200">
               <span>{snapProgress?.routeId === addStationToLine ? "Placing…" : "Click map to add station"}</span>
-              <span className="h-4 w-px bg-teal-200 dark:bg-teal-700" />
+              <span className="h-4 w-px bg-indigo-200 dark:bg-indigo-700" />
               <button
                 onClick={() => setAddStationToLine(null)}
-                className="font-semibold hover:text-teal-900 dark:hover:text-teal-100 transition-colors"
+                className="font-semibold hover:text-indigo-900 dark:hover:text-indigo-100 transition-colors"
               >
                 Done
               </button>
             </div>
             {snapProgress?.routeId === addStationToLine && (
-              <div className="h-0.5 bg-teal-100 dark:bg-teal-800">
+              <div className="h-0.5 bg-indigo-100 dark:bg-indigo-800">
                 <div
-                  className="h-full bg-teal-400 dark:bg-teal-400 transition-[width] duration-500 ease-out"
+                  className="h-full bg-indigo-400 dark:bg-indigo-400 transition-[width] duration-500 ease-out"
                   style={{ width: `${snapProgress.pct}%` }}
                 />
               </div>
@@ -4201,7 +4251,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {/* Top-center toolbar (desktop only) */}
       <div className="pointer-events-none hidden md:flex absolute top-5 left-0 right-0 justify-center gap-2">
-        {/* Layers dropdown — ALL map overlays live here. Pinned ones render as quick-toggle pills before the dropdown button. */}
+        {/* Layers dropdown — ALL map overlays live here. Pinned ones hang as a vertical quick-toggle stack below the button. */}
         <LayersDropdown
           overlays={(
             [
@@ -4232,7 +4282,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                 label: "Isochrone (travel time)",
                 sub: isochroneOrigin ? `${isochroneMinutes} min ${isoMode}` : "Pick origin to start",
                 on: !!isochroneOrigin,
-                color: "#0d9488",
+                color: "#6366f1",
                 // 📖 Learn: noPin on Isochrone — its config UI lives inline,
                 // so pinning it as a toolbar pill would lose the configurator.
                 noPin: true,
@@ -4267,7 +4317,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                 onToggle: () => setAiAnnotationsVisible(!aiAnnotationsVisible),
               },
             ] satisfies OverlaySpec[]
-          )}
+          ).map((o) => ({ ...o, icon: OVERLAY_ICONS[o.id] }))}
           pinned={pinnedLayers}
           onTogglePin={(id) => setPinnedLayers((prev) => {
             // 📖 Learn: build a new Set so React detects the state change.
@@ -4319,12 +4369,12 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => { setShowSimPanel((v) => !v); setShowPlansPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
-            showSimPanel ? "text-teal-700 border-teal-300 bg-teal-50" : "text-stone-400"
+            showSimPanel ? "text-indigo-700 border-indigo-300 bg-indigo-50" : "text-stone-400"
           }`}
         >
           <span
             className="h-3 w-3 shrink-0 rounded-full"
-            style={{ background: showSimPanel ? "#0d9488" : "#d1d5db" }}
+            style={{ background: showSimPanel ? "#6366f1" : "#d1d5db" }}
           />
           Simulate
         </button>
@@ -4333,12 +4383,12 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => { setShowPlansPanel((v) => !v); setShowSimPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
-            showPlansPanel ? "border-teal-300 bg-teal-50 text-teal-700" : "border-[#D7D7D7] text-stone-400"
+            showPlansPanel ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-[#D7D7D7] text-stone-400"
           }`}
         >
           <span
             className="h-3 w-3 shrink-0 rounded-full transition-colors"
-            style={{ background: showPlansPanel ? "#0d9488" : currentPlanId ? (planIsDirty ? "#f59e0b" : "#0d9488") : "#d1d5db" }}
+            style={{ background: showPlansPanel ? "#6366f1" : currentPlanId ? (planIsDirty ? "#f59e0b" : "#6366f1") : "#d1d5db" }}
           />
           Plans
         </button>
@@ -4389,7 +4439,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               onClick={() => handleSetDrawMode("select")}
               aria-label="Select neighbourhoods"
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
-                drawMode === "select" ? "bg-teal-50 text-teal-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
+                drawMode === "select" ? "bg-indigo-50 text-indigo-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
               }`}
             >
               {/* Cursor + dashed selection box — indicates click-to-select-region */}
@@ -4413,7 +4463,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             <button
               onClick={() => handleSetDrawMode("boundary")}
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
-                drawMode === "boundary" ? "bg-teal-50 text-teal-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
+                drawMode === "boundary" ? "bg-indigo-50 text-indigo-600" : "text-stone-400 hover:bg-stone-50 hover:text-stone-700"
               }`}
             >
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" className="h-4 w-4">
@@ -4510,10 +4560,10 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {simState && (
         <div className="pointer-events-none absolute top-[85px] left-0 right-0 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm text-teal-700 shadow-sm animate-pulse">
-            <span className="h-2 w-2 rounded-full bg-teal-500" />
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-700 shadow-sm animate-pulse">
+            <span className="h-2 w-2 rounded-full bg-indigo-500" />
             <span className="font-semibold">{`${simState.hour === 0 ? "12" : simState.hour > 12 ? simState.hour - 12 : simState.hour}:00 ${simState.hour < 12 ? "AM" : "PM"}`}</span>
-            <span className="text-teal-400 text-xs">{simState.activeIds.length} routes active</span>
+            <span className="text-indigo-400 text-xs">{simState.activeIds.length} routes active</span>
           </div>
         </div>
       )}
@@ -5071,7 +5121,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                     {authUser.picture ? (
                       <Image src={authUser.picture} alt={authUser.name ?? "User"} width={32} height={32} className="h-8 w-8 rounded-full object-cover shrink-0" />
                     ) : (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-100 text-xs font-semibold text-teal-600">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600">
                         {(authUser.name ?? authUser.email ?? "U")[0]?.toUpperCase()}
                       </div>
                     )}
@@ -5108,7 +5158,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   <button key={label} onClick={toggle} className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors">
                     <span className="flex items-center gap-1.5">
                       {label}
-                      {beta && <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[9px] font-bold text-teal-600 uppercase tracking-wide">beta</span>}
+                      {beta && <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-600 uppercase tracking-wide">beta</span>}
                     </span>
                     <span className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${highContrast ? (on ? "bg-yellow-400" : "bg-black ring-2 ring-white") : (on ? "bg-stone-700" : "bg-stone-200")}`}>
                       <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-transform ${highContrast ? (on ? "bg-black translate-x-3.5" : "bg-[#ffffff] translate-x-0.5") : (on ? "bg-white translate-x-3.5" : "bg-white translate-x-0.5")}`} />
@@ -5477,13 +5527,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {/* Agent animation controls */}
       {animAgents && (
         <div className="pointer-events-auto absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl border border-[#D7D7D7] bg-white px-5 py-3 shadow-xl">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="9" />
             </svg>
           </div>
           <div className="text-sm text-stone-700">
-            Animating <span className="font-semibold text-teal-700">{new Set(animAgents.map((a) => a.agent_id)).size.toLocaleString()}</span> agents
+            Animating <span className="font-semibold text-indigo-700">{new Set(animAgents.map((a) => a.agent_id)).size.toLocaleString()}</span> agents
           </div>
           {animClockLabel && (
             <div className="rounded-lg bg-stone-900 px-2.5 py-1 font-mono text-sm font-semibold text-white tabular-nums">
@@ -5508,7 +5558,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               animStartRef.current = null;
               setAnimAgents([...animAgents]);
             }}
-            className="rounded-lg px-3 py-1 text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+            className="rounded-lg px-3 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
           >
             Replay
           </button>

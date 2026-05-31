@@ -85,11 +85,15 @@ export function RoutePanel({
   return (
     <div className="pointer-events-auto flex h-full w-80 flex-col overflow-hidden rounded-2xl bg-white" style={{ border: "0.93px solid #BEB7B4" }}>
       <div className="flex items-start justify-between px-5 pt-5 pb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           {transferRoutes.length > 0 ? (
-            <div className="flex shrink-0 items-center">
+            // 📖 Learn: Tailwind grid-cols-3 — a fixed 3-column grid makes the
+            // route badges wrap into rows (a grid) once there are >3, so the
+            // cluster grows downward at a stable width instead of one long
+            // shrink-0 row that squeezes the station title into wrapping.
+            <div className="grid shrink-0 grid-cols-3 gap-1">
               <span
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold"
                 style={{ background: route.color, color: route.textColor }}
               >
                 {route.shortName}
@@ -97,7 +101,7 @@ export function RoutePanel({
               {transferRoutes.map((r) => (
                 <span
                   key={r.id}
-                  className="-ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold ring-2 ring-white"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold"
                   style={{ background: r.color, color: r.textColor }}
                 >
                   {r.shortName}

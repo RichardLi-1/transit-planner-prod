@@ -12,6 +12,8 @@
 export function trackVisit(event: string, meta?: Record<string, string>) {
   if (typeof window === "undefined") return;
   if (window.location.hostname === "localhost") return;
+  // test.<domain> is our staging subdomain — never report its traffic.
+  if (window.location.hostname.startsWith("test.")) return;
   if (localStorage.getItem("skip_tracking")) return;
 
   // fire-and-forget — we never await or surface errors to the user
