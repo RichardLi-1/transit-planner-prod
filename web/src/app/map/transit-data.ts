@@ -84,7 +84,7 @@ export const ROUTES: Route[] = [
       { name: "Yorkdale",        coords: [-79.4475, 43.7246] },
       { name: "Lawrence West",   coords: [-79.4439, 43.7153] },
       { name: "Glencairn",       coords: [-79.4405, 43.7086] },
-      { name: "Eglinton West",   coords: [-79.4365, 43.7000] },
+      { name: "Cedarvale",        coords: [-79.435639, 43.698930] },
       { name: "St Clair West",   coords: [-79.4156, 43.6845] },
       { name: "Dupont",          coords: [-79.4069, 43.6743] },
       { name: "Spadina",         coords: [-79.4050, 43.6697] },
@@ -106,7 +106,7 @@ export const ROUTES: Route[] = [
       { name: "Summerhill",      coords: [-79.3910, 43.6827] },
       { name: "St Clair",        coords: [-79.3933, 43.6881] },
       { name: "Davisville",      coords: [-79.3971, 43.6977] },
-      { name: "Eglinton",        coords: [-79.3986, 43.7056] },
+      { name: "Eglinton",        coords: [-79.398765, 43.706380] },
       { name: "Lawrence",        coords: [-79.4024, 43.7259] },
       { name: "York Mills",      coords: [-79.4061, 43.7438] },
       { name: "Sheppard–Yonge",  coords: [-79.4108, 43.7610] },
@@ -127,7 +127,7 @@ export const ROUTES: Route[] = [
       [-79.4475, 43.7246], // Yorkdale
       [-79.4439, 43.7153], // Lawrence West
       [-79.4405, 43.7086], // Glencairn
-      [-79.4365, 43.7000], // Eglinton West
+      [-79.435639, 43.698930], // Cedarvale
       [-79.4260, 43.6922], // curve — Allen corridor sweeps east
       [-79.4156, 43.6845], // St Clair West
       [-79.4069, 43.6743], // Dupont
@@ -151,7 +151,7 @@ export const ROUTES: Route[] = [
       [-79.3910, 43.6827], // Summerhill
       [-79.3933, 43.6881], // St Clair
       [-79.3971, 43.6977], // Davisville
-      [-79.3986, 43.7056], // Eglinton
+      [-79.398765, 43.706380], // Eglinton
       [-79.4024, 43.7259], // Lawrence
       [-79.4061, 43.7438], // York Mills
       [-79.4108, 43.7610], // Sheppard–Yonge
@@ -190,7 +190,7 @@ export const ROUTES: Route[] = [
       { name: "Ossington",      coords: [-79.4270, 43.6622] },
       { name: "Christie",       coords: [-79.4181, 43.6643] },
       { name: "Bathurst",       coords: [-79.4114, 43.6658] },
-      { name: "Spadina",        coords: [-79.4050, 43.6697] },
+      { name: "Spadina",        coords: [-79.4048, 43.6671] },
       { name: "St George",      coords: [-79.3988, 43.6684] },
       { name: "Bay",            coords: [-79.3909, 43.6700] },
       { name: "Bloor–Yonge",    coords: [-79.3856, 43.6706] },
@@ -206,7 +206,7 @@ export const ROUTES: Route[] = [
       { name: "Main Street",    coords: [-79.3015, 43.6891] },
       { name: "Victoria Park",  coords: [-79.2887, 43.6949] },
       { name: "Warden",         coords: [-79.2789, 43.7115] },
-      { name: "Kennedy",        coords: [-79.2642, 43.7323] },
+      { name: "Kennedy",        coords: [-79.264480, 43.732791] },
     ],
     // Curves: Victoria Park → Warden → Kennedy bend northeast then north
     shape: [
@@ -227,7 +227,7 @@ export const ROUTES: Route[] = [
       [-79.4048, 43.6671], // Spadina
       [-79.3988, 43.6684], // St George
       [-79.3909, 43.6700], // Bay
-      [-79.3864, 43.6710], // Bloor–Yonge
+      [-79.3856, 43.6706], // Bloor–Yonge
       [-79.3762, 43.6721], // Sherbourne
       [-79.3689, 43.6738], // Castle Frank
       [-79.3588, 43.6767], // Broadview
@@ -242,7 +242,7 @@ export const ROUTES: Route[] = [
       [-79.2836, 43.7032], // curve — bends northeast toward Warden
       [-79.2789, 43.7115], // Warden
       [-79.2716, 43.7219], // curve — continues northeast toward Kennedy
-      [-79.2642, 43.7323], // Kennedy
+      [-79.264480, 43.732791], // Kennedy
     ],
   },
   {
@@ -262,7 +262,7 @@ export const ROUTES: Route[] = [
     },
     stops: [
       // Ordered west → east
-      { name: "Sheppard–Yonge", coords: [-79.4102, 43.7616] },
+      { name: "Sheppard–Yonge", coords: [-79.4108, 43.7610] },
       { name: "Bayview",        coords: [-79.3867, 43.7669] },
       { name: "Bessarion",      coords: [-79.3763, 43.7692] },
       { name: "Leslie",         coords: [-79.3659, 43.7713] },
@@ -321,7 +321,7 @@ export const ROUTES: Route[] = [
     color: "#808080",
     textColor: "#ffffff",
     type: "lrt",
-    description: "LRT line along Finch Ave West from Humber College to Finch West Station, connecting to Line 1.",
+    description: "LRT line along Finch Ave West from Humber College to Finch West Station, where it transfers to Line 1 (Yonge–University) subway.",
     frequency: "Every 5–10 min",
     servicePattern: {
       headwayMinutes: 7,
@@ -348,7 +348,7 @@ export const ROUTES: Route[] = [
       { name: "Driftwood",           coords: [-79.513160, 43.758068] },
       { name: "Tobermory",           coords: [-79.507742, 43.759309] },
       { name: "Sentinel",            coords: [-79.499846, 43.761085] },
-      { name: "Finch West",          coords: [-79.490703, 43.763147] },
+      { name: "Finch West",          coords: [-79.4911, 43.7649] },
     ],
   },
 
@@ -489,7 +489,7 @@ export const ROUTES: Route[] = [
       { name: "Queen St East / Greenwood Ave", coords: [-79.325493, 43.664281] },
       { name: "Queen St East / Woodfield Rd", coords: [-79.321530, 43.665141] },
       { name: "Queen St East / Emdaabiimok Ave", coords: [-79.316789, 43.666193] },
-      { name: "Queen St East / Kingston Rd", coords: [-79.312890, 43.667119] },
+      { name: "Queen St East / Kingston Rd", coords: [-79.312948, 43.667029] },
       { name: "Kingston Rd / Dixon Ave", coords: [-79.311175, 43.669775] },
       { name: "Kingston Rd / Columbine Ave", coords: [-79.310310, 43.671380] },
       { name: "Kingston Rd / Woodbine Ave", coords: [-79.308088, 43.673673] },
@@ -566,7 +566,7 @@ export const ROUTES: Route[] = [
     description: "Streetcar along Dundas St West from Dundas West Loop to Broadview Station.",
     frequency: "Every 5–10 min",
     stops: [
-      { name: "Dundas West Station", coords: [-79.453460, 43.656698] },
+      { name: "Dundas West Station", coords: [-79.453463, 43.656821] },
       { name: "Edna Ave / Dundas St West", coords: [-79.453027, 43.657134] },
       { name: "Dundas St West / Roncesvalles Ave", coords: [-79.451258, 43.653480] },
       { name: "Dundas St West / Howard Park Ave", coords: [-79.448522, 43.652232] },
@@ -607,7 +607,7 @@ export const ROUTES: Route[] = [
       { name: "Broadview Ave / Millbrook Cres", coords: [-79.354734, 43.671897] },
       { name: "Broadview Ave / Wolfrey Ave", coords: [-79.356904, 43.674192] },
       { name: "Broadview Ave / Danforth Ave", coords: [-79.358601, 43.676051] },
-      { name: "Broadview Station", coords: [-79.358147, 43.677013] },
+      { name: "Broadview",         coords: [-79.3588, 43.6767] },
     ],
   },
   {
@@ -678,7 +678,7 @@ export const ROUTES: Route[] = [
       { name: "Gerrard St East / Norwood Rd", coords: [-79.303202, 43.683235] },
       { name: "Gerrard St East / Main St", coords: [-79.300386, 43.683838] },
       { name: "Main St / Danforth Ave - Danforth GO Station", coords: [-79.301635, 43.688037] },
-      { name: "Main Street Station", coords: [-79.301804, 43.688861] },
+      { name: "Main Street",         coords: [-79.3015, 43.6891] },
     ],
   },
   {
@@ -857,7 +857,7 @@ export const ROUTES: Route[] = [
     description: "Bathurst streetcar from Bathurst Station south to Exhibition Place.",
     frequency: "Every 5–10 min",
     stops: [
-      { name: "Bathurst Station", coords: [-79.411286, 43.666532] },
+      { name: "Bathurst",         coords: [-79.4114, 43.6658] },
       { name: "Bathurst St / Bloor St West", coords: [-79.411347, 43.665235] },
       { name: "Bathurst St / Lennox St", coords: [-79.410809, 43.663902] },
       { name: "Bathurst St / Harbord St", coords: [-79.409887, 43.661614] },
@@ -906,14 +906,14 @@ export const ROUTES: Route[] = [
       { name: "St Clair Ave West / Wychwood Ave", coords: [-79.422895, 43.682189] },
       { name: "St Clair Ave West / Vaughan Rd", coords: [-79.419348, 43.682875] },
       { name: "St Clair Ave West / Bathurst St", coords: [-79.417671, 43.683213] },
-      { name: "St Clair West Station", coords: [-79.415609, 43.684297] },
+      { name: "St Clair West",         coords: [-79.4156, 43.6845] },
       { name: "St Clair Ave West / Tweedsmuir Ave", coords: [-79.413336, 43.684084] },
       { name: "St Clair Ave West / Spadina Rd", coords: [-79.410569, 43.684699] },
       { name: "St Clair Ave West / Russell Hill Rd", coords: [-79.407321, 43.685403] },
       { name: "St Clair Ave West / Dunvegan Rd", coords: [-79.404757, 43.685922] },
       { name: "St Clair Ave West / Avenue Rd", coords: [-79.400882, 43.686666] },
       { name: "St Clair Ave West / Deer Park Cres", coords: [-79.397451, 43.687341] },
-      { name: "St Clair Station", coords: [-79.391958, 43.687857] },
+      { name: "St Clair",         coords: [-79.3933, 43.6881] },
     ],
   },
 ];
@@ -11479,4 +11479,20 @@ export const GO_TRAIN_ROUTES: Route[] = [
       { name: "Old Elm", coords: [-79.237098, 43.990395] },
     ],
   },
+];
+
+// ─── Pedestrian Connections ───────────────────────────────────────────────────
+// Pairs of stops on different routes that are physically the same station
+// but tracked as separate nodes, connected by an in-station walkway.
+
+export type PedestrianConnection = {
+  routeAId: string;
+  stopAName: string;
+  routeBId: string;
+  stopBName: string;
+};
+
+export const PEDESTRIAN_CONNECTIONS: PedestrianConnection[] = [
+  { routeAId: "line-1", stopAName: "Spadina", routeBId: "line-2", stopBName: "Spadina" },
+  { routeAId: "streetcar-510", stopAName: "Spadina Station", routeBId: "line-2", stopBName: "Spadina" },
 ];

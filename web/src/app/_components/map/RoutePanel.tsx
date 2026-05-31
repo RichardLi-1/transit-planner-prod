@@ -47,6 +47,7 @@ export function RoutePanel({
   onAddPortal,
   onClose,
   allRoutes = [],
+  pedestrianConnections = [],
 }: {
   route: Route;
   selectedStop: string | null;
@@ -59,6 +60,7 @@ export function RoutePanel({
   onAddPortal?: () => void;
   onClose: () => void;
   allRoutes?: Route[];
+  pedestrianConnections?: { route: Route; stopName: string }[];
 }) {
   const [snapState, setSnapState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [snapError, setSnapError] = useState<string | null>(null);
@@ -68,18 +70,56 @@ export function RoutePanel({
   const allStops = route.stops;
   const isCustomLine = !!onDeleteLine;
 
+  // Routes (other than this one) that share the selected stop — used for transfer indicators
+  const transferRoutes = selectedStop
+    ? allRoutes.filter((r) => r.id !== route.id && r.stops.some((s) => s.name === selectedStop))
+    : [];
+
+  // Set of stop names that are transfer nodes (shared with any other route)
+  const transferStopNames = new Set(
+    allStops
+      .filter((s) => allRoutes.some((r) => r.id !== route.id && r.stops.some((os) => os.name === s.name)))
+      .map((s) => s.name)
+  );
+
   return (
     <div className="pointer-events-auto flex h-full w-80 flex-col overflow-hidden rounded-2xl bg-white" style={{ border: "0.93px solid #BEB7B4" }}>
       <div className="flex items-start justify-between px-5 pt-5 pb-4">
         <div className="flex items-center gap-3">
-          <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
-            style={{ background: route.color, color: route.textColor }}
-          >
-            {route.shortName}
-          </span>
+          {transferRoutes.length > 0 ? (
+            <div className="flex shrink-0 items-center">
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
+                style={{ background: route.color, color: route.textColor }}
+              >
+                {route.shortName}
+              </span>
+              {transferRoutes.map((r) => (
+                <span
+                  key={r.id}
+                  className="-ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold ring-2 ring-white"
+                  style={{ background: r.color, color: r.textColor }}
+                >
+                  {r.shortName}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold"
+              style={{ background: route.color, color: route.textColor }}
+            >
+              {route.shortName}
+            </span>
+          )}
           <div>
-            {selectedStop && <p className="text-xs font-medium text-stone-500">{route.name}</p>}
+            {selectedStop && (
+              <p className="text-xs font-medium text-stone-500">
+                {transferRoutes.length > 0
+                  ? `Transfer: ${[route, ...transferRoutes].map((r) => `Line ${r.shortName}`).join(" · ")}`
+                  : route.name}
+              </p>
+            )}
             <h2 className="text-lg font-bold leading-tight text-stone-800">{selectedStop ?? route.name}</h2>
           </div>
         </div>
@@ -94,7 +134,7 @@ export function RoutePanel({
 
       {selectedStop && popServed !== undefined && (
         <div className="mx-5 mt-0 rounded-xl bg-stone-50 px-4 py-3">
-          <p className="text-xs font-semibold text-stone-500">Population Served</p>
+          <p className="text-xs font-semibold text-stone-500">Population Served{transferRoutes.length > 0 ? " (combined)" : ""}</p>
           <p className="mt-1 text-2xl font-bold text-stone-800">{popServed.toLocaleString()}</p>
           <p className="text-[11px] text-stone-400">Nearest-station assignment, {route.type === "streetcar" || route.type === "bus" ? "1" : "5"} km cutoff</p>
         </div>
@@ -106,6 +146,25 @@ export function RoutePanel({
           Frequency: <span className="text-stone-600">{route.frequency}</span>
         </p>
       </div>
+
+      {pedestrianConnections.length > 0 && (
+        <div className="mx-5 mt-3 rounded-xl border border-stone-200 px-4 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-stone-500">
+            <svg viewBox="0 0 12 12" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="6" cy="2" r="1" fill="currentColor" stroke="none"/>
+              <path d="M6 4v3l-1.5 2M6 7l1.5 2M4.5 5.5h3"/>
+            </svg>
+            Same station — pedestrian walkway
+          </p>
+          {pedestrianConnections.map(({ route: r, stopName }) => (
+            <div key={r.id} className="flex items-center gap-2 text-sm text-stone-700">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ background: r.color, color: r.textColor }}>{r.shortName}</span>
+              <span>{stopName}</span>
+              <span className="ml-auto text-xs text-stone-400">by foot</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Timetable — opens full page in new tab */}
       <div className="mx-5 mt-4">
@@ -232,6 +291,7 @@ export function RoutePanel({
         </p>
         <ol className="relative border-l-2" style={{ borderColor: route.color + "44" }}>
           {allStops.map((stop, i) => {
+            const isTransfer = transferStopNames.has(stop.name);
             return (
               <li key={`${i}-${stop.name}`} className="group mb-0 flex items-center justify-between">
                 <div className="flex items-center min-w-0">
@@ -247,6 +307,11 @@ export function RoutePanel({
                   <span className={`py-1.5 pl-4 text-sm ${stop.name === selectedStop ? "font-bold text-stone-900" : "text-stone-700"}`}>
                     {stop.name}
                   </span>
+                  {isTransfer && (
+                    <span className="ml-1.5 shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-stone-400 bg-stone-100">
+                      Transfer
+                    </span>
+                  )}
                 </div>
                 {isCustomLine && (
                   <button

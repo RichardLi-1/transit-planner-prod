@@ -9,6 +9,7 @@ import {
   ROUTES,
   BUS_ROUTES,
   GO_TRAIN_ROUTES,
+  PEDESTRIAN_CONNECTIONS,
   type GeneratedRoute,
   type Route,
 } from "~/app/map/transit-data";
@@ -3256,6 +3257,27 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     );
   }, [showServiceHeatmap, routes, mapLoaded]);
 
+  // ── pedestrian connections ────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const SRC = "pedestrian-connections-src";
+    const LAYER = "pedestrian-connections-line";
+    const features: GeoJSON.Feature<GeoJSON.LineString>[] = PEDESTRIAN_CONNECTIONS.flatMap((conn) => {
+      const stopA = routes.find((r) => r.id === conn.routeAId)?.stops.find((s) => s.name === conn.stopAName);
+      const stopB = routes.find((r) => r.id === conn.routeBId)?.stops.find((s) => s.name === conn.stopBName);
+      if (!stopA || !stopB) return [];
+      return [{ type: "Feature" as const, geometry: { type: "LineString" as const, coordinates: [stopA.coords, stopB.coords] }, properties: {} }];
+    });
+    const geojson: GeoJSON.FeatureCollection = { type: "FeatureCollection", features };
+    if (map.getSource(SRC)) {
+      (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData(geojson);
+    } else {
+      map.addSource(SRC, { type: "geojson", data: geojson });
+      map.addLayer({ id: LAYER, type: "line", source: SRC, paint: { "line-color": "#000000", "line-width": 2, "line-dasharray": [2, 2], "line-opacity": 0.55 } });
+    }
+  }, [mapLoaded, routes]);
+
   // ── catchment circles overlay ─────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -4700,6 +4722,17 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               : undefined}
             onClose={() => { setSelectedRouteId(null); setSelectedStop(null); }}
             allRoutes={routes}
+            pedestrianConnections={selectedStop ? PEDESTRIAN_CONNECTIONS.flatMap((conn) => {
+              if (conn.routeAId === selectedRoute.id && conn.stopAName === selectedStop) {
+                const r = routes.find((r) => r.id === conn.routeBId);
+                return r ? [{ route: r, stopName: conn.stopBName }] : [];
+              }
+              if (conn.routeBId === selectedRoute.id && conn.stopBName === selectedStop) {
+                const r = routes.find((r) => r.id === conn.routeAId);
+                return r ? [{ route: r, stopName: conn.stopAName }] : [];
+              }
+              return [];
+            }) : []}
           />
         ) : showGeneratedPanel ? (
           <GeneratedRoutePanel
@@ -4803,6 +4836,17 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       {stationPopup && (() => {
         // True only for user-drawn custom routes; generated route stops are read-only.
         const isCustom = routes.some(r => r.id === stationPopup.routeId);
+        const walkinConnections = PEDESTRIAN_CONNECTIONS.flatMap((conn) => {
+          if (conn.routeAId === stationPopup.routeId && conn.stopAName === stationPopup.name) {
+            const r = routes.find((r) => r.id === conn.routeBId);
+            return r ? [{ route: r, stopName: conn.stopBName }] : [];
+          }
+          if (conn.routeBId === stationPopup.routeId && conn.stopBName === stationPopup.name) {
+            const r = routes.find((r) => r.id === conn.routeAId);
+            return r ? [{ route: r, stopName: conn.stopAName }] : [];
+          }
+          return [];
+        });
         return (
           <StationPopup
             popup={stationPopup}
@@ -4815,6 +4859,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                 r.stops.some((s) => s.name === stationPopup.name)
               )
             }
+            pedestrianConnections={walkinConnections}
             onRemoveTransfer={(targetRouteId) => {
               handleDeleteStop(stationPopup.name, targetRouteId);
             }}
