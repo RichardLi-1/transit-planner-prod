@@ -10,17 +10,21 @@ export const MAP_ASSISTANT_PROMPT_SUFFIX = `
 You are a transit planner's spatial assistant. The MAP is the answer — prose is secondary.
 
 Rules:
-- Text must be EXTREMELY short: at most ONE brief sentence, often zero. Let the annotations speak.
-- Light markdown is OK (bold, a short bullet list) but never long paragraphs.
+- Keep text short (1–2 sentences), but ALWAYS explain what you drew. Light markdown (bold, a short bullet) is OK; never long paragraphs.
 - For EVERY spatial finding, call highlight_area, draw_corridor, or drop_pin.
-- highlight_area polygons must trace the ACTUAL outline of the area: use 6–12 vertices that
-  follow the real gap/cluster shape. NEVER return a 4-corner rectangle or bounding box — organic shapes only.
-- Use query_network to verify any specific claim about routes or stops before annotating.
+- Whenever you draw a highlight_area, SAY SOMETHING about that polygon in your text: name the place, what the gap/cluster is, and why it matters. Never leave a polygon unexplained.
+
+Highlight discipline — be precise, not lazy:
+- NEVER shade water. Lake Ontario, the harbour, rivers and the island channels are not gaps — gaps are about PEOPLE, so polygons must stay over inhabited land.
+- Use find_coverage_gaps to get REAL, named gaps instead of guessing; use describe_location to confirm a point is inhabited land (likelyInhabited: true) before you highlight it.
+- Keep each polygon FOCUSED on ONE underserved pocket, at most a few km across. Do NOT shade an entire borough, ward, or district — that is not actionable. If a large area is weak, pick the single worst pocket. (Oversized polygons are rejected by the server.)
+- Before claiming a gap, use query_network (stops_in_bbox / nearest_stop) to confirm there really are few/no stops there. Don't guess.
+- Trace the ACTUAL outline: 6–12 vertices following the real shape. NEVER a 4-corner rectangle or bounding box — organic shapes only.
 
 Example:
 User: "Where are the biggest network gaps in midtown?"
-Assistant text: "Two coverage holes east of Yonge."
-Tools: fly_to(bbox around midtown) → query_network(stops_in_bbox) → highlight_area(8-point gap outline) → drop_pin(worst intersection)
+Assistant text: "Shaded **Leaside** — dense housing but no rapid transit within ~1.5 km — and pinned the worst intersection."
+Tools: fly_to(bbox around midtown) → query_network(stops_in_bbox) → highlight_area(8-point Leaside outline) → drop_pin(worst intersection)
 
 Coordinates are [longitude, latitude] in WGS84. Polygons are arrays of [lng, lat] pairs.
 `;
@@ -29,8 +33,10 @@ export const mapTools: Anthropic.Messages.Tool[] = [
   {
     name: "highlight_area",
     description:
-      "Shade a region on the map. Use for spatial findings like coverage gaps or demand clusters. " +
-      "The polygon must be an organic, non-rectangular outline that traces the real shape of the area.",
+      "Shade ONE specific underserved pocket or demand cluster — at most a few km across, never a whole " +
+      "borough and never over water (Lake Ontario, rivers). Oversized polygons are rejected. " +
+      "The polygon must be an organic, non-rectangular outline that traces the real shape of the area. " +
+      "Always explain the polygon in your text reply.",
     input_schema: {
       type: "object",
       properties: {
@@ -125,6 +131,47 @@ export const mapTools: Anthropic.Messages.Tool[] = [
         reason: { type: "string" },
       },
       required: ["bbox"],
+    },
+  },
+  {
+    name: "describe_location",
+    description:
+      "Ground yourself at a point BEFORE highlighting. Returns the neighbourhood (if any), " +
+      "nearest stop + distance, nearest population centre, and a `likelyInhabited` flag. " +
+      "If likelyInhabited is false, the point is probably water or empty land — do NOT highlight there.",
+    input_schema: {
+      type: "object",
+      properties: {
+        point: {
+          type: "array",
+          items: { type: "number" },
+          minItems: 2,
+          maxItems: 2,
+        },
+      },
+      required: ["point"],
+    },
+  },
+  {
+    name: "find_coverage_gaps",
+    description:
+      "Server-computed REAL transit gaps: inhabited neighbourhoods whose centre is far " +
+      "(default ≥1 km) from any stop, worst-first. Every result is on land and named. " +
+      "PREFER this over guessing where gaps are, then highlight_area the worst ones.",
+    input_schema: {
+      type: "object",
+      properties: {
+        bbox: {
+          type: "array",
+          items: { type: "number" },
+          minItems: 4,
+          maxItems: 4,
+        },
+        minStopKm: {
+          type: "number",
+          description: "Distance-to-nearest-stop threshold in km (default 1.0).",
+        },
+      },
     },
   },
   {

@@ -692,8 +692,8 @@ export function ExperimentalPanel({
       {/* header */}
       <button onClick={() => { setOpen((v) => !v); if (open) setTab(null); }} className="flex w-full items-center justify-between px-4 py-3 text-left shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-widest">Tools</span>
-          <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-600 uppercase tracking-wide">beta</span>
+          <span className="text-xs font-semibold text-stone-400 uppercase tracking-widest">Analysis</span>
+          <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>
         </div>
         <svg viewBox="0 0 10 10" fill="currentColor" className={`h-2.5 w-2.5 text-stone-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}>
           <path d="M2 3l3 4 3-4H2z" />
