@@ -114,10 +114,12 @@ async function speakQuote(agent: string, text: string): Promise<void> {
     });
     if (!resp.ok) return;
     const blob = await resp.blob();
+    if (!blob.size) return;
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     audio.onended = () => URL.revokeObjectURL(url);
-    void audio.play();
+    audio.onerror = () => URL.revokeObjectURL(url);
+    audio.play().catch(() => URL.revokeObjectURL(url));
   } catch {
     // ignore TTS errors silently
   }

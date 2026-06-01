@@ -13,6 +13,7 @@ const VOICE_MAP: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
+  if (!ELEVENLABS_KEY) return new Response("TTS not configured", { status: 503 });
   const { text, agent } = await req.json() as { text: string; agent: string };
   const voiceId = VOICE_MAP[agent] ?? VOICE_MAP["Alex Chen"]!;
 
