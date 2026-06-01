@@ -175,7 +175,7 @@ export function AIChatPanel({ routes, onClose, avoidRightRail, seed, onSeedConsu
       </div>
 
       {/* Chat body */}
-      <div className="flex-1 min-h-0 p-3">
+      <div className="flex flex-col flex-1 min-h-0 p-3">
         <TransitAssistant routes={routes} seed={seed} onSeedConsumed={onSeedConsumed} />
       </div>
     </div>

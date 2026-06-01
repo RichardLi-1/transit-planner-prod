@@ -208,7 +208,7 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {annotations.length > 0 && (
         <div className="mb-2 shrink-0">
           <div className="flex items-center justify-between gap-2">
