@@ -17,6 +17,28 @@ html, body, * {
   display: none !important;
 }
 
+/* ── Animations ───────────────────────────────────────────────────────────── */
+
+/* Smooth pop-in for count badges (e.g. the Layers active-count chip). The badge
+   is conditionally mounted, so a CSS transition wouldn't fire on appear — a
+   keyframe animation runs on mount, which is what we want. It fades in while
+   scaling up with a slight overshoot so the number eases in instead of snapping. */
+@keyframes badge-pop-in {
+  0%   { opacity: 0; transform: scale(0.4); }
+  60%  { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-badge-pop {
+  /* cubic-bezier(.34,1.56,.64,1) overshoots past 1 then settles for a gentle
+     spring feel; `both` holds the 0% frame before the animation starts. */
+  animation: badge-pop-in 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Honour users who ask the OS for reduced motion — drop the spring/scale. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-badge-pop { animation: none; }
+}
+
 /* ── Dark mode overrides ──────────────────────────────────────────────────── */
 
 html.dark { color-scheme: dark; }

@@ -103,7 +103,12 @@ export function LayersDropdown({ overlays, pinned, onTogglePin, actions = [] }: 
           </svg>
           Layers
           {activeCount > 0 && (
-            <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-stone-100 px-1.5 text-xs font-medium text-stone-600">
+            // key={activeCount} remounts the badge on each change so the
+            // pop-in animation re-fires (not just on first appearance).
+            <span
+              key={activeCount}
+              className="animate-badge-pop ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-stone-100 px-1.5 text-xs font-medium text-stone-600"
+            >
               {activeCount}
             </span>
           )}

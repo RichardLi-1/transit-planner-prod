@@ -6,7 +6,7 @@ import {
   WRITE_MAP_TOOLS,
 } from "./ai-map-tools";
 import {
-  handleQueryNetwork,
+  handleReadTool,
   validateWriteToolArgs,
 } from "./ai-map-tools.handlers";
 
@@ -104,18 +104,21 @@ export async function* streamMapToolResponse(
     const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
 
     for (const tu of toolUses) {
-      if (tu.name === "query_network") {
-        const result = handleQueryNetwork(tu.input as Record<string, unknown>);
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: JSON.stringify(result),
-        });
-      } else if (WRITE_MAP_TOOLS.has(tu.name)) {
+      if (WRITE_MAP_TOOLS.has(tu.name)) {
+        // Write tools were already streamed to the client + rendered; just ack.
         toolResults.push({
           type: "tool_result",
           tool_use_id: tu.id,
           content: JSON.stringify({ status: "rendered_on_map" }),
+        });
+      } else {
+        // Read tools (query_network, describe_location, find_coverage_gaps):
+        // run server-side and feed the data back so the agent can act on it.
+        const result = handleReadTool(tu.name, tu.input as Record<string, unknown>);
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify(result),
         });
       }
     }

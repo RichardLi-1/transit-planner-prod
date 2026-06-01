@@ -119,6 +119,47 @@ function darkenColor(hex: string): string {
   return `#${toHex(r2)}${toHex(g2)}${toHex(b2)}`;
 }
 
+// ─── Map layer stacking ────────────────────────────────────────────────────────
+// Mapbox draws layers strictly in their array order (bottom→top); there are no
+// "layer groups", so we manage z-order by hand with addLayer(beforeId) and
+// moveLayer. These helpers centralise the two rules we re-stack against.
+// 📖 Learn: moveLayer(id, beforeId) puts `id` directly BELOW `beforeId`;
+//   moveLayer(id) with no beforeId lifts it to the very top.
+
+/** AI-annotation overlay layers, listed bottom→top in the order they paint.
+ *  These are things the user explicitly asked the AI to draw, so they must
+ *  always sit on the very top — above route lines AND basemap labels. */
+const AI_OVERLAY_LAYER_IDS = [
+  "ai-highlights-fill",
+  "ai-highlights-line",
+  "ai-corridors-line",
+  "ai-pins-layer",
+  "ai-pins-label",
+  "ai-edit-handles-midpoint",
+  "ai-edit-handles-vertex",
+] as const;
+
+/** The lowest AI-overlay layer currently on the map, or undefined if none.
+ *  Used as a moveLayer `beforeId` anchor so re-stacking the route layers can
+ *  lift them high WITHOUT ever rising above the AI overlay. When no AI overlay
+ *  exists, callers pass this undefined → moveLayer lifts to the very top. */
+function aiOverlayFloor(map: mapboxgl.Map): string | undefined {
+  return AI_OVERLAY_LAYER_IDS.find((id) => map.getLayer(id));
+}
+
+/** True for a basemap symbol layer that renders a place / admin NAME label
+ *  (neighbourhood, city, region, country). In Mapbox light/dark-v11 these are
+ *  the "settlement-*", "state-*", "country-*" and "continent-*" layers — the
+ *  grey "FINANCIAL DISTRICT" / "Toronto" text. We keep these BELOW the route
+ *  lines so the lines read clearly over them. Every OTHER label (road names,
+ *  transit-station pills, POIs) stays ABOVE the lines so it stays legible. */
+function isPlaceNameLabel(layer: mapboxgl.LayerSpecification): boolean {
+  if (layer.type !== "symbol") return false;
+  const hasText = (layer.layout as Record<string, unknown> | undefined)?.["text-field"];
+  if (!hasText) return false;
+  return /^(settlement|state|country|continent)/.test(layer.id);
+}
+
 /** Approximate circle as a closed ring of [lng,lat] pairs. */
 function circlePolygon(center: [number, number], radiusM: number, steps = 36): [number, number][] {
   const lngPerM = 1 / (111320 * Math.cos(center[1] * Math.PI / 180));
@@ -2894,8 +2935,11 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         properties: { note: a.label.length > 24 ? a.label.slice(0, 22).trimEnd() + "…" : a.label, icon: a.args.icon ?? "info", color: a.color ?? "#14b8a6" },
       }));
 
-    const beforeId = map.getLayer("neighbourhood-fill") ? "neighbourhood-fill" : undefined;
-
+    // All AI overlay layers are added with NO beforeId, so they land on the very
+    // TOP of the map — above the route lines and every basemap label. These are
+    // annotations the user explicitly asked the AI to draw, so they always win
+    // the z-order. (The route re-stack effect anchors its moves at the lowest of
+    // these via aiOverlayFloor(), so route layers can never rise above them.)
     if (map.getSource(HIGHLIGHT_SRC)) {
       (map.getSource(HIGHLIGHT_SRC) as mapboxgl.GeoJSONSource).setData({
         type: "FeatureCollection",
@@ -2916,7 +2960,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             "fill-opacity": 0.25,
           },
         },
-        beforeId,
       );
       map.addLayer(
         {
@@ -2929,7 +2972,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             "line-opacity": 0.7,
           },
         },
-        beforeId,
       );
     }
 
@@ -2955,7 +2997,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             "line-dasharray": [2, 1],
           },
         },
-        beforeId,
       );
     }
 
@@ -3329,7 +3370,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
   }, [showDisruption, disruptionRadius, disruptionRouteId, routes, hiddenRoutes, mapLoaded]);
 
   // ── measure tool ──────────────────────────────────────────────────────────
-  // Reset measure mode when the Tools panel is closed so clicks aren't intercepted
+  // Reset measure mode when the Analysis panel is closed so clicks aren't intercepted
   useEffect(() => { if (!experimentalFeatures) setMeasureMode(false); }, [experimentalFeatures]);
   useEffect(() => {
     measureModeRef.current = measureMode;
@@ -3718,47 +3759,44 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       map.on("mouseleave", `stops-dot-${route.id}`, () => { map.getCanvas().style.cursor = ""; });
     });
 
-    // ── Re-stack route layers relative to the basemap + each other ──────────
-    // Layers are inserted per-route in a loop, and Mapbox draws strictly in
-    // insertion order (no layer groups). Two problems fell out of that:
-    //   1. The dark station "pills" in the basemap (e.g. "Union (Subway)") were
-    //      being painted OVER by our coloured route lines, because the lines are
-    //      added on top of the whole basemap (no beforeId). Fix: drop the line
-    //      layers BELOW the basemap's label layers so the pills sit on top.
-    //   2. A route added later painted its line over an EARLIER route's dots,
-    //      so crossing lines hid stop dots/labels. Fix: lift our markers to top.
-    // 📖 Learn: moveLayer(id, beforeId) puts `id` directly below `beforeId`;
-    //   moveLayer(id) with no beforeId lifts it to the very top.
-    //   https://docs.mapbox.com/mapbox-gl-js/api/map/#map#movelayer
+    // ── Re-stack route layers relative to the basemap, AI overlay + each other ─
+    // Mapbox draws layers in array order (no groups), so we rebuild the vertical
+    // stack whenever the routes change. Target order, bottom→top:
+    //
+    //   basemap fills/roads + PLACE-NAME labels  (FINANCIAL DISTRICT, Toronto)
+    //   → route lines              ← painted OVER the neighbourhood names
+    //   → basemap street / transit labels + station pills  (kept legible on top)
+    //   → route stop dots
+    //   → route stop labels
+    //   → AI annotation overlay    ← always the very top
+    //
+    // Constraints preserved:
+    //   • crossing routes must not hide each other's dots → every line sits
+    //     below every dot (we move lines first, dots after).
+    //   • AI annotations the user asked for must never be covered → we anchor
+    //     all moves at the AI overlay floor, not the literal top of the stack.
+    const floor = aiOverlayFloor(map); // undefined → moveLayer lifts to very top
 
-    // The basemap's lowest text layer — inserting below it = below ALL basemap
-    // labels (street names, place names, and the transit-station pills).
-    const firstLabelLayer = map
-      .getStyle()
-      ?.layers?.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown>)?.["text-field"])?.id;
+    // Basemap labels to keep ABOVE the route lines: streets, transit pills, POIs
+    // — everything with text that ISN'T a place/admin name. Collected in their
+    // existing bottom→top order so their relative stacking is preserved.
+    const keepAboveLabelIds = (map.getStyle()?.layers ?? [])
+      .filter((l) => l.type === "symbol" && (l.layout as Record<string, unknown>)?.["text-field"] && !isPlaceNameLabel(l))
+      .map((l) => l.id);
 
-    if (firstLabelLayer && map.getLayer(firstLabelLayer)) {
-      // Build the desired bottom→top stack for ALL of our route layers, then
-      // move each one to sit directly below the basemap labels. Because each
-      // moveLayer(id, firstLabelLayer) call drops `id` just under that label
-      // layer (above whatever we moved previously), calling them in this order
-      // reproduces the stack exactly — and ALL of it ends up beneath the
-      // basemap pills, so nothing of ours (lines OR dots) covers a pill.
-      //   grouped by type across routes so no route's line hides another
-      //   route's dots: every line sits below every dot.
-      const lineIds = routes.flatMap((r) => [`route-shadow-${r.id}`, `route-outline-${r.id}`, `route-line-${r.id}`, `route-shimmer-${r.id}`, `underground-line-${r.id}`]);
-      const dotIds = routes.flatMap((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`]);
-      const labelIds = routes.map((r) => `stops-label-${r.id}`);
-      [...lineIds, ...dotIds, ...labelIds].forEach((id) => {
-        if (map.getLayer(id)) map.moveLayer(id, firstLabelLayer);
-      });
-    } else {
-      // Fallback (basemap label layer not found): can't sit below the pills,
-      // so at least keep dots/labels above lines to fix the crossing-line bug.
-      const raise = (id: string) => { if (map.getLayer(id)) map.moveLayer(id); };
-      routes.forEach((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`].forEach(raise));
-      routes.forEach((r) => raise(`stops-label-${r.id}`));
-    }
+    const lineIds = routes.flatMap((r) => [`route-shadow-${r.id}`, `route-outline-${r.id}`, `route-line-${r.id}`, `route-shimmer-${r.id}`, `underground-line-${r.id}`]);
+    const dotIds = routes.flatMap((r) => [`stops-ring-${r.id}`, `stops-selected-${r.id}`, `stops-dot-${r.id}`, `portals-dot-${r.id}`]);
+    const labelIds = routes.map((r) => `stops-label-${r.id}`);
+
+    // Each moveLayer(id, floor) drops `id` directly below the AI floor, ABOVE
+    // whatever the previous call moved. Running the groups in this sequence
+    // reproduces the target stack from the bottom up. Place-name labels are
+    // deliberately NOT moved, so they stay below the lines.
+    const moveBelowFloor = (id: string) => { if (map.getLayer(id)) map.moveLayer(id, floor); };
+    lineIds.forEach(moveBelowFloor);           // 1. lines above the basemap
+    keepAboveLabelIds.forEach(moveBelowFloor); // 2. street/transit labels above lines
+    dotIds.forEach(moveBelowFloor);            // 3. stop dots above those
+    labelIds.forEach(moveBelowFloor);          // 4. stop labels on top of our stack
   }, [routes, mapLoaded]);
 
   // ── drag-to-reposition stops while in edit mode
@@ -4275,8 +4313,8 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
               { id: "serviceHeatmap", label: "Service Heatmap", sub: "Density weighted by mode", on: showServiceHeatmap, color: "#f97316", onToggle: () => setShowServiceHeatmap((v) => !v) },
               { id: "liveVehicles", label: "Live vehicles", sub: "Real-time TTC positions", on: showLiveVehicles, color: "#10b981", onToggle: () => setShowLiveVehicles((v) => !v) },
               { id: "transitDesert", label: "Transit deserts", sub: "Underserved population areas", on: showTransitDesert, loading: desertComputing, color: "#f43f5e", onToggle: () => setShowTransitDesert((v) => !v) },
-              { id: "catchment", label: "Catchment circles", sub: "Radius around each station (advanced config in Tools panel)", on: showCatchment, color: "#10b981", onToggle: () => setShowCatchment((v) => !v) },
-              { id: "disruption", label: "Disruption zones", sub: "Noise/impact buffer (advanced config in Tools panel)", on: showDisruption, color: "#f43f5e", onToggle: () => setShowDisruption((v) => !v) },
+              { id: "catchment", label: "Catchment circles", sub: "Radius around each station (advanced config in Analysis panel)", on: showCatchment, color: "#10b981", onToggle: () => setShowCatchment((v) => !v) },
+              { id: "disruption", label: "Disruption zones", sub: "Noise/impact buffer (advanced config in Analysis panel)", on: showDisruption, color: "#f43f5e", onToggle: () => setShowDisruption((v) => !v) },
               {
                 id: "isochrone",
                 label: "Isochrone (travel time)",
@@ -4369,7 +4407,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => { setShowSimPanel((v) => !v); setShowPlansPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-3 rounded-xl border border-[#D7D7D7] bg-white px-6 text-base font-normal shadow-sm transition-all ${
-            showSimPanel ? "text-indigo-700 border-indigo-300 bg-indigo-50" : "text-stone-400"
+            showSimPanel ? "text-indigo-700 border-stone-400" : "text-stone-400"
           }`}
         >
           <span
@@ -4383,7 +4421,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => { setShowPlansPanel((v) => !v); setShowSimPanel(false); }}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
-            showPlansPanel ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-[#D7D7D7] text-stone-400"
+            showPlansPanel ? "border-stone-400 text-indigo-700" : "border-[#D7D7D7] text-stone-400"
           }`}
         >
           <span
@@ -4399,13 +4437,14 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
         <button
           onClick={() => setShowAIChat((v) => !v)}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
-            showAIChat ? "border-teal-300 bg-teal-50 text-teal-700" : "border-[#D7D7D7] text-stone-400"
+            showAIChat ? "border-stone-400 text-teal-700" : "border-[#D7D7D7] text-stone-400"
           }`}
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 shrink-0">
             <path d="M8 1.5L9.5 6L14 7.5L9.5 9L8 13.5L6.5 9L2 7.5L6.5 6Z" />
           </svg>
           Ask AI
+          <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>
         </button>
 
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
@@ -4889,6 +4928,12 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             }}
             onAddTransfer={!isCustom ? undefined : (targetRouteId) => {
               const { name, coords } = stationPopup;
+              // Read the pre-add route from the ref (not the `routes` closure) so
+              // the re-snap decision below matches what triggerAutoSnap will see.
+              const routeBeforeAdd = routesRef.current.find((r) => r.id === targetRouteId);
+              // If the stop is already on this route the setRoutes map is a no-op,
+              // so there's nothing new to snap — skip the road-route regeneration.
+              const alreadyHasStop = routeBeforeAdd?.stops.some((s) => s.name === name) ?? false;
               snapshotHistory();
               setRoutes((prev) => prev.map((r) => {
                 if (r.id !== targetRouteId) return r;
@@ -4913,8 +4958,22 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   if (cost < bestCost) { bestIdx = i + 1; bestCost = cost; }
                 }
                 const newStops = [...r.stops.slice(0, bestIdx), newStop, ...r.stops.slice(bestIdx)];
+                // Keep the old shape on screen while the re-snap runs (see below);
+                // triggerAutoSnap overwrites it once the road route comes back.
                 return { ...r, stops: newStops, shape: roadSnapped ? r.shape : undefined };
               }));
+              // Bus/streetcar lines follow roads, so inserting a transfer stop
+              // changes the path — re-run the road-snap exactly like placing a
+              // stop by clicking the map does. Without this the line keeps its
+              // old geometry and never routes through the new transfer station.
+              if (
+                !alreadyHasStop &&
+                (routeBeforeAdd?.type === "bus" || routeBeforeAdd?.type === "streetcar") &&
+                routeBeforeAdd.stops.length >= 1
+              ) {
+                startShimmerRef.current(targetRouteId);
+                triggerAutoSnapRef.current(targetRouteId);
+              }
               setStationPopup(null);
             }}
           />
@@ -5152,13 +5211,13 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   ["Dark mode", darkMode, () => setDarkMode((v) => !v), false],
                   ["High contrast", highContrast, () => setHighContrast((v) => !v), false],
                   ["Imperial units", imperial, () => setImperial((v) => !v), false],
-                  ["Tools panel", advancedMode, () => { const next = !advancedMode; setAdvancedMode(next); setExperimentalFeatures(next); }, false],
+                  ["Analysis panel", advancedMode, () => { const next = !advancedMode; setAdvancedMode(next); setExperimentalFeatures(next); }, false],
                   ["GO Transit", showGoTrain, () => setShowGoTrain((v) => !v), true],
                 ] as [string, boolean, () => void, boolean][]).map(([label, on, toggle, beta]) => (
                   <button key={label} onClick={toggle} className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors">
                     <span className="flex items-center gap-1.5">
                       {label}
-                      {beta && <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-600 uppercase tracking-wide">beta</span>}
+                      {beta && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>}
                     </span>
                     <span className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${highContrast ? (on ? "bg-yellow-400" : "bg-black ring-2 ring-white") : (on ? "bg-stone-700" : "bg-stone-200")}`}>
                       <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-transform ${highContrast ? (on ? "bg-black translate-x-3.5" : "bg-[#ffffff] translate-x-0.5") : (on ? "bg-white translate-x-3.5" : "bg-white translate-x-0.5")}`} />
