@@ -12,25 +12,36 @@ _Design smarter cities, one route at a time._
 
 ## Overview
 
-Transit Planner is an AI-powered urban transit design tool built for city planners and researchers. Draw proposed subway routes on an interactive map of Toronto, and a council of AI agents — a transit planner, a cost analyst, a NIMBY resident, and a PR director — will debate the merits of your route in real time, drawing on real ridership data, population density, and infrastructure constraints.
+Transit Planner is an AI-powered urban transit design tool for city planners. Draw proposed subway, LRT, or bus routes on a live map of Toronto — then watch a council of six Claude agents debate your route in real time, stress-testing it for cost, ridership, community impact, and political risk.
 
-No spreadsheets. No guesswork. Just a map, your cursor, and four AIs arguing about your decisions.
+No spreadsheets. No guesswork. Just a map, your cursor, and six AIs arguing about your decisions.
 
 ## Features
 
-- **Interactive route builder** — draw, edit, and delete subway lines directly on a live Mapbox map of Toronto's transit network
-- **AI route generation** — describe what you want and an AI assistant generates a proposed route
-- **Multi-agent council deliberation** — four distinct Claude-powered personas debate every proposed route, surfacing trade-offs across cost, ridership, community impact, and public relations
-- **Real ridership & population analysis** — stations are evaluated against real TTC boardings and PostGIS-based population heatmaps
-- **Neighbourhood context** — click any area to see demographic and traffic data for that zone
-- **Streaming responses** — all AI deliberation streams live via Server-Sent Events, so you see the debate unfold in real time
-- **Street view integration** — preview proposed stop locations at street level
+- **Interactive map** — draw, edit, and delete transit lines on a live Mapbox map of Toronto's full TTC network
+- **AI route generation** — describe a corridor and the AI assistant proposes a route, snapping to real TTC stops
+- **AI map assistant** — ask spatial questions ("where are the network gaps?") and get answers drawn directly on the map
+- **6-agent council** — structured multi-turn deliberation streams live via SSE as agents debate, rebut, and vote
+- **Transit simulation** — ridership gravity model, travel time scoring, and equity metrics for any proposed network
+- **Population & traffic layers** — PostGIS-backed heatmaps of density, ridership demand, and road congestion
+- **Street view** — preview any proposed stop location at street level
+- **Timetable view** — schedule visualisation for planned routes
+- **Agent voice** — ElevenLabs TTS reads agent quotes aloud during deliberation
 
-## Demo
+## How the Council Works
 
-Navigate to `http://localhost:3000/map` after setup to open the interactive planner.
+Each council run is a structured 6-turn debate:
 
-The AI council can be triggered from the route panel once a route is drawn or generated.
+| Agent | Role | Model |
+|---|---|---|
+| Alex Chen | Ridership Planner — advocates for equity and high-density corridors | Sonnet |
+| Jordan Park | Infrastructure Analyst — scrutinises cost and construction feasibility | Sonnet |
+| Margaret Thompson | NIMBY Resident — raises community and neighbourhood concerns | Haiku |
+| Devon Walsh | PR Director — evaluates political risk and public perception | Haiku |
+| Alex & Jordan | Joint Rebuttal — synthesised response to critique | Sonnet |
+| Planning Commission | Final verdict with binding route modifications | Sonnet |
+
+Agents use tool calls to query real TTC stop data and enforce planning rules: 800m minimum station spacing, no gaps over 1500m, and transfer stations must justify connections to existing lines.
 
 ## Tech Stack
 
@@ -40,169 +51,93 @@ The AI council can be triggered from the route panel once a route is drawn or ge
 | Styling | Tailwind CSS 4 |
 | Mapping | Mapbox GL, Mapbox GL Draw |
 | 3D | Three.js / React Three Fiber |
-| AI Platform | Anthropic Claude (Haiku 4.5 & Sonnet 4.5) |
-| Auth | NextAuth.js v5 |
-| Database | PostgreSQL (multiple instances), Supabase (PostGIS) |
-| Python Backend | FastAPI, SQLAlchemy, Alembic |
-| Validation | Zod (TS), Pydantic (Python) |
-| Containerization | Docker, Docker Compose |
-| Deployment | Vercel (frontend) |
-
-## How It Works
-
-1. A planner draws or generates a new subway route on the map
-2. The route — along with station locations, population data, and ridership figures — is passed to the AI council
-3. Four Claude personas deliberate in structured turns:
-   - **Alex** (Transit Planner) — proposes and defends the route
-   - **Jordan** (Cost Analyst) — scrutinizes budget and infrastructure cost
-   - **Margaret** (NIMBY Resident) — raises community and construction concerns
-   - **Devon** (PR Director) — evaluates public perception and political feasibility
-4. The council reaches a verdict with actionable feedback
-5. The planner adjusts and re-submits — or proceeds to export
+| AI | Anthropic Claude (Haiku 4.5 + Sonnet) · Gemini (optional) |
+| Auth | Auth0 via NextAuth v5 |
+| Database | Supabase + PostGIS |
+| Voice | ElevenLabs TTS |
+| Deployment | Docker, Vercel |
 
 ## Local Development
 
 ### Prerequisites
 
 - Node.js 20+
-- Python 3.12+
-- A [Mapbox account](https://account.mapbox.com) (free tier works)
-- An [Anthropic API key](https://console.anthropic.com) for AI features
-- A [Supabase project](https://supabase.com) with PostGIS enabled (for population/traffic layers)
+- [Mapbox](https://account.mapbox.com) public token
+- [Anthropic API key](https://console.anthropic.com) for the AI council
+- [Supabase](https://supabase.com) project with PostGIS (population and ridership layers)
 
 ### Setup
 
 ```bash
-# Clone and install
 git clone https://github.com/evanzyang91/transit-planner.git
 cd transit-planner
 npm install
 
-# Configure environment
-cp .env.example .env
-# Fill in the required values (see below)
+# Copy and fill in environment variables
+cp .env.example web/.env.local
 
-# Start the Next.js frontend
+# Start the dev server (from repo root or web/)
 npm run dev
 ```
 
-Frontend runs at `http://localhost:3000`.
+App runs at `http://localhost:3000`. Navigate to `/map` for the planner.
 
-### Python Backend (for council deliberation & ridership data)
+### Scripts
 
-```bash
-# From the repo root with a virtual environment active
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-python -m uvicorn python_server.api.main:app --reload --port 8000
-```
-
-Backend runs at `http://localhost:8000`.
-
-### Docker (all services)
+All commands can be run from the repo root or `web/`:
 
 ```bash
-docker-compose up
-```
-
-### Available Scripts
-
-```bash
-npm run dev            # Start Next.js with Turbopack
+npm run dev            # Next.js + Turbopack
 npm run build          # Production build
-npm run start          # Serve production build
 npm run lint           # ESLint
-npm run typecheck      # TypeScript checks
-npm run format:write   # Auto-format with Prettier
+npm run typecheck      # TypeScript
+npm run format:write   # Prettier
 ```
 
 ## Environment Variables
 
-Create a `.env` file at the repo root from `.env.example`:
+Set these in `web/.env.local`:
 
 ```bash
-# Mapbox — required for map rendering
+# Required
 NEXT_PUBLIC_MAPBOX_TOKEN=pk.ey...
-
-# Anthropic — required for AI council and route generation
 ANTHROPIC_API_KEY=sk-ant-...
-
-# Supabase — required for population heatmap and traffic layers
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_anon_key
+SUPABASE_KEY=your_service_role_key
+AUTH_SECRET=                        # openssl rand -base64 32
 
-# NextAuth — required for authentication
-NEXTAUTH_URL=http://localhost:3000
-AUTH_SECRET=                      # generate with: openssl rand -base64 32
-
-# Python backend URL (used by Next.js to proxy ridership requests)
-PYTHON_SERVER_URL=http://localhost:8000
-
-# PostgreSQL — multiple instances for service isolation
-DATABASE_URL_GO=postgresql://postgres:postgres@localhost:5433/genghis
-DATABASE_URL_PYTHON=postgresql://postgres:postgres@localhost:5434/genghis
-DATABASE_URL_EXPRESS=postgresql://postgres:postgres@localhost:5435/genghis
-DATABASE_URL_WEB=postgresql://postgres:postgres@localhost:5436/genghis
+# Optional
+ELEVENLABS_KEY=                     # agent voice TTS
+GEMINI_API_KEY=                     # alternative AI provider
+AI_PROVIDER=anthropic               # "anthropic" (default) or "gemini"
+DISCORD_WEBHOOK_URL=                # council result notifications
 ```
-
-**Where to get keys:**
-- **Mapbox**: [account.mapbox.com](https://account.mapbox.com) → Tokens
-- **Anthropic**: [console.anthropic.com](https://console.anthropic.com) → API Keys
-- **Supabase**: [supabase.com](https://supabase.com) → Project Settings → API
 
 ## Project Structure
 
 ```
 transit-planner/
-├── web/                        # Next.js app
+├── web/
 │   └── src/
 │       ├── app/
-│       │   ├── map/            # Main map page
-│       │   ├── api/            # API routes (AI, auth, data)
-│       │   └── _components/    # UI components
-│       └── server/             # Server-side clients (Anthropic, Supabase, etc.)
-├── python_server/              # FastAPI backend
-│   └── api/
-│       ├── main.py             # App entrypoint & CORS
-│       ├── council.py          # Multi-agent deliberation logic
-│       └── ridership.py        # Transit ridership queries
-├── python_utils/               # DB migrations (Alembic)
-├── docker-compose.yml
+│       │   ├── map/                # Main planner page
+│       │   ├── timetable/          # Route schedule view
+│       │   ├── docs/               # Documentation + AI chat
+│       │   └── api/                # API routes (council, simulation, AI, data)
+│       ├── server/                 # Council orchestration, AI providers, Supabase
+│       └── lib/                    # Shared utilities
+├── can_pop.geojson                 # Canadian population dataset (90MB)
 ├── Dockerfile.web
-├── Dockerfile.web-backend
-└── .env.example
+├── docker-compose.yml
+└── vercel.json
 ```
-
-## API Overview
-
-### Next.js Routes
-
-| Route | Purpose |
-|---|---|
-| `POST /api/ai/chat` | Stream AI assistant responses (SSE) |
-| `POST /api/ai/station-summary` | AI summary for a station |
-| `POST /api/council` | Trigger multi-agent council deliberation |
-| `GET /api/traffic` | Traffic data from Supabase |
-| `POST /api/ridership/station` | Station-level boardings |
-| `POST /api/ridership/line` | Line-level ridership |
-| `GET /api/population` | Population heatmap data |
-| `GET /api/streetview` | Street view imagery |
-
-### Python Backend (`:8000`)
-
-| Route | Purpose |
-|---|---|
-| `GET /health` | Health check |
-| `POST /council` | Council deliberation with streaming |
-| `POST /ridership/station` | Station boardings query |
-| `POST /ridership/line` | Line ridership query |
 
 ## Contributing
 
-PRs are welcome. For anything beyond small fixes, open an issue first so we can align on approach.
+PRs are welcome. For anything beyond small fixes, open an issue first.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE)
