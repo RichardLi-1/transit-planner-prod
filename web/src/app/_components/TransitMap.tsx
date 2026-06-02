@@ -369,6 +369,8 @@ export function TransitMap() {
   const [selectedStations, setSelectedStations] = useState<Set<string>>(new Set()); // "name::routeId"
   const [focusedNeighbourhood, setFocusedNeighbourhood] = useState<{ id: string; name: string; lat: number; lng: number; geometry: GeoJSON.Geometry | null } | null>(null);
   const [stationPopup, setStationPopup] = useState<{ name: string; routeId: string; x: number; y: number; coords: [number, number] } | null>(null);
+  // Pairs the user has explicitly dismissed as transfers: "routeA:routeB:stopName" (routeIds sorted)
+  const [transferExclusions, setTransferExclusions] = useState<Set<string>>(new Set());
   const [showNewLineModal, setShowNewLineModal] = useState(false);
   const [showCoverageZones, setShowCoverageZones] = useState(false);
   const [showServiceHeatmap, setShowServiceHeatmap] = useState(false);
@@ -4900,14 +4902,21 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
             stationPopulations={stationPopulations}
             isDeletable={isCustom}
             connectedRoutes={
-              routes.filter((r) =>
-                r.id !== stationPopup.routeId &&
-                r.stops.some((s) => s.name === stationPopup.name)
-              )
+              routes.filter((r) => {
+                if (r.id === stationPopup.routeId) return false;
+                const match = r.stops.find((s) => s.name === stationPopup.name);
+                if (!match) return false;
+                // Only treat as a transfer if the stops are physically co-located (≤50m)
+                if (haversineKm(stationPopup.coords, match.coords) > 0.05) return false;
+                // Respect explicit user dismissals
+                const key = [stationPopup.routeId, r.id].sort().join(":") + ":" + stationPopup.name;
+                return !transferExclusions.has(key);
+              })
             }
             pedestrianConnections={walkinConnections}
             onRemoveTransfer={(targetRouteId) => {
-              handleDeleteStop(stationPopup.name, targetRouteId);
+              const key = [stationPopup.routeId, targetRouteId].sort().join(":") + ":" + stationPopup.name;
+              setTransferExclusions((prev) => new Set([...prev, key]));
             }}
             onClose={() => setStationPopup(null)}
             onDelete={() => { handleDeleteStop(stationPopup.name, stationPopup.routeId); setStationPopup(null); }}
