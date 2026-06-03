@@ -10,17 +10,25 @@ import { env } from "~/env.js";
 // 📖 Learn: Next.js Route Handlers — https://nextjs.org/docs/app/building-your-application/routing/route-handlers
 
 export async function POST(req: NextRequest) {
-  const webhookUrl = env.DISCORD_WEBHOOK_URL;
+  const {
+    event,
+    meta = {},
+    webhookType = "regular_visit",
+  } = (await req.json()) as {
+    event: string;
+    meta?: Record<string, string>;
+    webhookType?: "regular_visit" | "referral_visit";
+  };
+
+  const webhookUrl =
+    webhookType === "referral_visit"
+      ? (env.DISCORD_REFERRAL_VISITS_WEBHOOK_URL ?? env.DISCORD_WEBHOOK_URL)
+      : (env.DISCORD_REGULAR_VISITS_WEBHOOK_URL ?? env.DISCORD_WEBHOOK_URL);
 
   // No secret configured (e.g. fresh clone) → do nothing. Tracking is non-critical.
   if (!webhookUrl) {
     return new Response(null, { status: 204 });
   }
-
-  const { event, meta = {} } = (await req.json()) as {
-    event: string;
-    meta?: Record<string, string>;
-  };
 
   // Vercel injects visitor geolocation as x-vercel-ip-* headers at the edge.
   // Reading them server-side avoids a client-side IP lookup and keeps it free.

@@ -9,7 +9,13 @@
 // has no such rules.
 // 📖 Learn: Rules of Hooks — https://react.dev/reference/rules/rules-of-hooks
 
-export function trackVisit(event: string, meta?: Record<string, string>) {
+export type VisitWebhookType = "regular_visit" | "referral_visit";
+
+export function trackVisit(
+  event: string,
+  meta?: Record<string, string>,
+  webhookType: VisitWebhookType = "regular_visit",
+) {
   if (typeof window === "undefined") return;
   if (window.location.hostname === "localhost") return;
   // test.<domain> is our staging subdomain — never report its traffic.
@@ -20,7 +26,7 @@ export function trackVisit(event: string, meta?: Record<string, string>) {
   void fetch("/api/track", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ event, meta }),
+    body: JSON.stringify({ event, meta, webhookType }),
   }).catch(() => {
     // silently swallow network errors — tracking should never break the UI
   });

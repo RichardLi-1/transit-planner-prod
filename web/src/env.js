@@ -15,6 +15,9 @@ export const env = createEnv({
     AI_PROVIDER: z.enum(["anthropic", "gemini"]).optional(),
     ELEVENLABS_KEY: z.string().min(1),
     DISCORD_WEBHOOK_URL: z.string().url().optional(),
+    DISCORD_REGULAR_VISITS_WEBHOOK_URL: z.string().url().optional(),
+    DISCORD_REFERRAL_VISITS_WEBHOOK_URL: z.string().url().optional(),
+    DISCORD_BUG_REPORTS_WEBHOOK_URL: z.string().url().optional(),
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
@@ -44,6 +47,12 @@ export const env = createEnv({
 
     NEXT_PUBLIC_MAPBOX_TOKEN: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
     DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+    DISCORD_REGULAR_VISITS_WEBHOOK_URL:
+      process.env.DISCORD_REGULAR_VISITS_WEBHOOK_URL,
+    DISCORD_REFERRAL_VISITS_WEBHOOK_URL:
+      process.env.DISCORD_REFERRAL_VISITS_WEBHOOK_URL,
+    DISCORD_BUG_REPORTS_WEBHOOK_URL:
+      process.env.DISCORD_BUG_REPORTS_WEBHOOK_URL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

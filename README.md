@@ -112,7 +112,10 @@ AUTH_SECRET=                        # openssl rand -base64 32
 ELEVENLABS_KEY=                     # agent voice TTS
 GEMINI_API_KEY=                     # alternative AI provider
 AI_PROVIDER=anthropic               # "anthropic" (default) or "gemini"
-DISCORD_WEBHOOK_URL=                # council result notifications
+DISCORD_WEBHOOK_URL=                # fallback/general Discord notifications
+DISCORD_REGULAR_VISITS_WEBHOOK_URL= # regular visit notifications
+DISCORD_REFERRAL_VISITS_WEBHOOK_URL= # referral visit notifications
+DISCORD_BUG_REPORTS_WEBHOOK_URL=    # bug report feedback notifications
 ```
 
 ## Project Structure

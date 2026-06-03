@@ -16,6 +16,23 @@ const REFERRAL_SOURCES: Record<string, string> = {
 };
 // ──────────────────────────────────────────────────────────────────────────────
 
+const TRACKING_OPT_OUT_KEY = "skip_tracking";
+const TRACKING_OPT_OUT_PARAM = "m";
+
+function saveTrackingOptOutFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has(TRACKING_OPT_OUT_PARAM)) return;
+
+  localStorage.setItem(TRACKING_OPT_OUT_KEY, "1");
+  params.delete(TRACKING_OPT_OUT_PARAM);
+  const query = params.toString();
+  window.history.replaceState(
+    {},
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+  );
+}
+
 // Fires a Discord webhook once per page load to log visitor info.
 // Using a ref (not state) for `hasTracked` avoids a re-render — it's a mutable
 // value we only read internally.
@@ -26,6 +43,8 @@ export function usePageViewTracker() {
   const slashKeyHeld = useRef(false);
 
   useEffect(() => {
+    saveTrackingOptOutFromUrl();
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "/") slashKeyHeld.current = true;
     };
@@ -51,7 +70,7 @@ export function usePageViewTracker() {
       if (window.location.hostname === "localhost") return;
       // test.<domain> is our staging subdomain — never report its traffic.
       if (window.location.hostname.startsWith("test.")) return;
-      if (localStorage.getItem("skip_tracking")) return;
+      if (localStorage.getItem(TRACKING_OPT_OUT_KEY)) return;
       if (/bot|crawler|spider/i.test(navigator.userAgent)) return;
 
       // Only a bounce if they never left this first page…
@@ -69,6 +88,7 @@ export function usePageViewTracker() {
       // Carry the referral so we still know where the bouncer came from.
       const referral = localStorage.getItem("referral_source");
       const payload = {
+        webhookType: referral ? "referral_visit" : "regular_visit",
         event: referral
           ? `👋 Quick bounce from **${referral}** on ${window.location.pathname}`
           : `👋 Quick bounce on ${window.location.pathname}`,
@@ -97,7 +117,7 @@ export function usePageViewTracker() {
       if (window.location.hostname === "localhost") return;
       // test.<domain> is our staging subdomain — never report its traffic.
       if (window.location.hostname.startsWith("test.")) return;
-      if (localStorage.getItem("skip_tracking")) return;
+      if (localStorage.getItem(TRACKING_OPT_OUT_KEY)) return;
 
       // Only track once per page load.
       if (hasTracked.current) return;
@@ -109,13 +129,13 @@ export function usePageViewTracker() {
       const deviceType = isMobile ? "📱 Mobile" : "🖥️ Desktop";
       const platform = /iPhone|iPad/.test(ua)
         ? "iOS"
-        : /Android/.test(ua)
+        : ua.includes("Android")
           ? "Android"
-          : /Mac/.test(navigator.platform)
+          : navigator.platform.includes("Mac")
             ? "macOS"
-            : /Win/.test(navigator.platform)
+            : navigator.platform.includes("Win")
               ? "Windows"
-              : /Linux/.test(navigator.platform)
+              : navigator.platform.includes("Linux")
                 ? "Linux"
                 : "Unknown";
 
@@ -168,18 +188,24 @@ export function usePageViewTracker() {
           : rawParams
             ? `👀 New visitor — CUSTOM REFERRAL on ${currentPath}`
             : `👀 New visitor on ${currentPath}`;
+      const webhookType =
+        referralSource || rawParams ? "referral_visit" : "regular_visit";
 
       // trackVisit() calls our own /api/track — the webhook URL never leaves
       // the server, so it can't be scraped from the browser. IP + geolocation
       // are added server-side from Vercel's edge headers.
-      trackVisit(eventLabel, {
-        "🖥️ Device": `${deviceType} · ${platform}`,
-        "🛤️ Path": pathTrail,
-        "🔗 URL": fullUrl,
-        "🕒 Time": new Date().toLocaleString(),
-        ...(rawParams ? { "🔗 Params": `?${rawParams}` } : {}),
-        ...(isBot ? { "🔍 UA": ua } : {}),
-      });
+      trackVisit(
+        eventLabel,
+        {
+          "🖥️ Device": `${deviceType} · ${platform}`,
+          "🛤️ Path": pathTrail,
+          "🔗 URL": fullUrl,
+          "🕒 Time": new Date().toLocaleString(),
+          ...(rawParams ? { "🔗 Params": `?${rawParams}` } : {}),
+          ...(isBot ? { "🔍 UA": ua } : {}),
+        },
+        webhookType,
+      );
     };
 
     sendVisit();

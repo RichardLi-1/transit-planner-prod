@@ -2,11 +2,6 @@ import { NextResponse } from "next/server";
 import { env } from "~/env.js";
 
 export async function POST(req: Request) {
-  const webhookUrl = env.DISCORD_WEBHOOK_URL;
-  if (!webhookUrl) {
-    return NextResponse.json({ error: "Feedback not configured" }, { status: 503 });
-  }
-
   let body: { message?: unknown; category?: unknown; name?: unknown } = {};
   try {
     body = (await req.json()) as typeof body;
@@ -15,11 +10,26 @@ export async function POST(req: Request) {
   }
 
   const message = typeof body.message === "string" ? body.message.trim() : "";
-  const category = typeof body.category === "string" ? body.category.trim() : "General";
+  const category =
+    typeof body.category === "string" ? body.category.trim() : "General";
   const name = typeof body.name === "string" ? body.name.trim() : "";
+  const isBugReport = category.toLowerCase() === "bug report";
+  const webhookUrl = isBugReport
+    ? (env.DISCORD_BUG_REPORTS_WEBHOOK_URL ?? env.DISCORD_WEBHOOK_URL)
+    : env.DISCORD_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    return NextResponse.json(
+      { error: "Feedback not configured" },
+      { status: 503 },
+    );
+  }
 
   if (!message || message.length > 2000) {
-    return NextResponse.json({ error: "Message required (max 2000 chars)" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Message required (max 2000 chars)" },
+      { status: 400 },
+    );
   }
 
   const embed = {

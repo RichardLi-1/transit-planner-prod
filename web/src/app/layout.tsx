@@ -7,8 +7,7 @@ import VercelRedirectModal from "./_components/VercelRedirectModal";
 import MixpanelInit from "./_components/MixpanelInit";
 import PageViewTracker from "./_components/PageViewTracker";
 import PreviewBuildBadge from "./_components/PreviewBuildBadge";
-import { Analytics } from "@vercel/analytics/next"
-import { SpeedInsights } from "@vercel/speed-insights/next"
+import TrackingIntegrations from "./_components/TrackingIntegrations";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_BASE_URL ??
@@ -82,7 +81,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var s=localStorage.getItem("darkMode");var d=(s===null)?window.matchMedia("(prefers-color-scheme: dark)").matches:s==="1";if(d)document.documentElement.classList.add("dark");if(localStorage.getItem("highContrast")==="1")document.documentElement.classList.add("hc");}catch(e){}})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var p=new URLSearchParams(window.location.search);if(p.has("m")){localStorage.setItem("skip_tracking","1");p.delete("m");var q=p.toString();window.history.replaceState({},"",window.location.pathname+(q?"?"+q:"")+window.location.hash)}var s=localStorage.getItem("darkMode");var d=(s===null)?window.matchMedia("(prefers-color-scheme: dark)").matches:s==="1";if(d)document.documentElement.classList.add("dark");if(localStorage.getItem("highContrast")==="1")document.documentElement.classList.add("hc");}catch(e){}})();` }} />
         {/* mapbox-gl.css is copied to public/ by the prebuild script.
             We load it here instead of via webpack import because npm workspaces
             hoists mapbox-gl to the monorepo root, and Next.js's CSS pipeline
@@ -101,8 +100,7 @@ export default function RootLayout({
           <PreviewBuildBadge />
           {children}
         </Auth0Provider>
-        <Analytics />
-        <SpeedInsights />
+        <TrackingIntegrations />
       </body>
     </html>
   );
