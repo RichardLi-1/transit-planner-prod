@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { trackEvent } from "~/lib/analytics";
 import {
   colorFromArgs,
@@ -30,20 +30,68 @@ type ToolCallHandler = (payload: {
   turnId: string;
 }) => string | void;
 
+// Shape we persist to localStorage — only the durable bits, never the transient
+// isLoading/error flags.
+type PersistedState = Pick<AnthropicState, "assistantId" | "threadId" | "messages">;
+
 export function useAnthropic(
   customSystemPrompt?: string,
   options?: {
     mapTools?: boolean;
     onToolCall?: ToolCallHandler;
+    // When set, the conversation (messages + server thread IDs) is mirrored to
+    // localStorage under this key, so it survives the panel unmounting (hide/open)
+    // and page reloads. Omit it and the hook stays purely in-memory as before.
+    persistKey?: string;
   },
 ) {
-  const [state, setState] = useState<AnthropicState>({
-    assistantId: null,
-    threadId: null,
-    messages: [],
-    isLoading: false,
-    error: null,
+  const persistKey = options?.persistKey;
+
+  // Lazy initialiser: restore a prior conversation on first mount. The server
+  // keeps thread state in-memory for the life of the process, so a restored
+  // threadId usually still continues the same Anthropic thread after a reload;
+  // worst case (server restarted) the next send starts fresh but the history is
+  // still readable here. 📖 Learn: passing a function to useState runs it once,
+  // avoiding a localStorage read on every render.
+  const [state, setState] = useState<AnthropicState>(() => {
+    const base: AnthropicState = {
+      assistantId: null,
+      threadId: null,
+      messages: [],
+      isLoading: false,
+      error: null,
+    };
+    if (!persistKey || typeof window === "undefined") return base;
+    try {
+      const raw = localStorage.getItem(persistKey);
+      if (!raw) return base;
+      const saved = JSON.parse(raw) as Partial<PersistedState>;
+      if (!Array.isArray(saved.messages)) return base;
+      return {
+        ...base,
+        assistantId: saved.assistantId ?? null,
+        threadId: saved.threadId ?? null,
+        messages: saved.messages,
+      };
+    } catch {
+      return base; // malformed JSON — ignore and start clean
+    }
   });
+
+  // Mirror durable state to localStorage whenever it changes.
+  useEffect(() => {
+    if (!persistKey || typeof window === "undefined") return;
+    try {
+      const toSave: PersistedState = {
+        assistantId: state.assistantId,
+        threadId: state.threadId,
+        messages: state.messages,
+      };
+      localStorage.setItem(persistKey, JSON.stringify(toSave));
+    } catch {
+      /* quota or serialization failure — non-fatal, just skip persisting */
+    }
+  }, [persistKey, state.assistantId, state.threadId, state.messages]);
 
   const sendMessageStreaming = useCallback(
     async (
@@ -298,7 +346,10 @@ export function useAnthropic(
       isLoading: false,
       error: null,
     });
-  }, []);
+    if (persistKey && typeof window !== "undefined") {
+      try { localStorage.removeItem(persistKey); } catch { /* ignore */ }
+    }
+  }, [persistKey]);
 
   return {
     ...state,
