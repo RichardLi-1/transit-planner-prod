@@ -4680,7 +4680,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
       {/* Plans panel — slides in from the right */}
       <div
-        className={`pointer-events-none absolute right-6 bottom-6 flex items-start transition-all duration-300 ease-in-out z-10 ${
+        className={`pointer-events-auto absolute right-6 bottom-6 flex items-start transition-all duration-300 ease-in-out z-10 ${
           showPlansPanel && !selectedRoute && !showGeneratedPanel ? "translate-x-0" : "translate-x-[calc(100%+2.25rem)]"
         }`}
         style={{ top: "80px" }}
