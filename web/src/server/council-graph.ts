@@ -3,7 +3,19 @@ import "server-only";
 import { Annotation, END, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 
 import { getProvider, type ToolDefinition } from "./ai-provider";
-import { scoreRoute, type CouncilInput, type ExistingStop, type OrchestratorDirective, type RouteScore } from "./council";
+import {
+  scoreRoute,
+  routeToProposedLine,
+  toSimSummary,
+  type CouncilInput,
+  type ExistingStop,
+  type OrchestratorDirective,
+  type RouteScore,
+  type SimSummary,
+} from "./council";
+import { runSimulation } from "./simulation";
+import { DEMAND_TOOLS, handleDemandTool } from "./council-demand-tools";
+import { haversineKm } from "~/app/map/geo-utils";
 
 const HAIKU = "claude-haiku-4-5-20251001";
 const SONNET = "claude-sonnet-4-6";
@@ -230,6 +242,13 @@ const State = Annotation.Root({
   priorContested: defaulted<string[]>(() => []),
   priorRouteA: defaulted<RouteResult | null>(() => null),
   priorRouteB: defaulted<RouteResult | null>(() => null),
+  // Simulation outcomes for the current round (root cause #2): produced by simNode
+  // after both planners propose, surfaced to critics + commission, and stashed into
+  // prior* on revision so planners self-correct against real accessibility/equity.
+  simA: defaulted<SimSummary | null>(() => null),
+  simB: defaulted<SimSummary | null>(() => null),
+  priorSimA: defaulted<SimSummary | null>(() => null),
+  priorSimB: defaulted<SimSummary | null>(() => null),
 });
 
 type CouncilState = typeof State.State;
@@ -399,6 +418,20 @@ function buildBrief(input: Pick<CouncilState, "neighbourhoods" | "stations" | "l
   return brief;
 }
 
+// Total great-circle length of a route in km (sum of consecutive gaps).
+function routePathKm(stops: RouteStop[]): number {
+  let total = 0;
+  for (let i = 1; i < stops.length; i++) total += haversineKm(stops[i - 1]!.coords, stops[i]!.coords);
+  return total;
+}
+
+// Root cause #4 fix: the old version *always* re-sorted stops by projecting them
+// onto the axis between the two farthest stops. That de-zigzags a straight
+// corridor, but mangles a deliberately L-shaped or curved route into a different
+// order than the planner intended. Now we only adopt the projection order when it
+// actually produces a *shorter* total path; otherwise we keep the model's order.
+// 📖 Learn: projecting onto the longest axis is optimal only for near-collinear
+// points. Comparing path lengths lets us detect when that assumption breaks.
 function sortRouteStops(route: Record<string, unknown>): RouteResult {
   const stops = route.stops as RouteStop[] | undefined;
   if (!stops || stops.length <= 2) return route as unknown as RouteResult;
@@ -432,7 +465,70 @@ function sortRouteStops(route: Record<string, unknown>): RouteResult {
     return pa - pb;
   });
 
-  return { ...(route as unknown as RouteResult), stops: sorted };
+  // Keep the projection order only if it doesn't make the route longer than what
+  // the planner gave us (a small tolerance avoids churn from rounding).
+  const chosen = routePathKm(sorted) <= routePathKm(stops) * 1.001 ? sorted : stops;
+  return { ...(route as unknown as RouteResult), stops: chosen };
+}
+
+// Root cause #3 fix: hard geometric rules used to be *advisory* (in the prompt,
+// surfaced by scoreRoute) but never enforced — so invalid routes shipped. This
+// deterministically repairs the cheap-to-fix violations before a route is shown:
+//   • drop stops outside the Toronto bounding box,
+//   • de-duplicate stops sitting < 250 m on top of each other,
+//   • relabel a stop within 800 m of an existing TTC station as a "<Station>
+//     Transfer" (the rule's own escape hatch), instead of leaving it illegal.
+// Gap-too-large violations need *adding* stops, which we leave to the planners.
+function repairRoute(
+  route: RouteResult | null,
+  existingLines: ExistingStop[],
+): { route: RouteResult | null; fixes: string[] } {
+  if (!route?.stops?.length) return { route, fixes: [] };
+  const fixes: string[] = [];
+
+  // 1. Drop out-of-bounds stops.
+  let stops = route.stops.filter((s) => {
+    const [lon, lat] = s.coords;
+    const ok = lon >= -79.65 && lon <= -79.1 && lat >= 43.55 && lat <= 43.85;
+    if (!ok) fixes.push(`dropped ${s.name} (outside Toronto)`);
+    return ok;
+  });
+
+  // 2. De-duplicate near-coincident stops (keep the first).
+  const deduped: RouteStop[] = [];
+  for (const s of stops) {
+    if (deduped.some((k) => haversineKm(k.coords, s.coords) * 1000 < 250)) {
+      fixes.push(`merged duplicate ${s.name}`);
+      continue;
+    }
+    deduped.push(s);
+  }
+  stops = deduped;
+
+  // 3. Relabel stops that sit within 800 m of an existing station as transfers.
+  stops = stops.map((s) => {
+    if (/transfer/i.test(s.name)) return s;
+    const near = existingLines.find((es) => haversineKm(es.coords, s.coords) * 1000 < 800);
+    if (near) {
+      fixes.push(`relabelled ${s.name} → ${near.name} Transfer`);
+      return { ...s, name: `${near.name} Transfer` };
+    }
+    return s;
+  });
+
+  return { route: { ...route, stops }, fixes };
+}
+
+// Compact, planner-facing view of a route's simulated outcome — only the
+// dimensions a planner can act on (who it reaches, equity, time saved).
+function formatSimForPlanner(sim: SimSummary | null): string {
+  if (!sim) return "";
+  return (
+    `Accessibility ${sim.baselinePctAccessible.toFixed(1)}% → ${sim.scenarioPctAccessible.toFixed(1)}% ` +
+    `(+${sim.accessibilityGainPct.toFixed(1)}%), ${sim.newlyAccessibleAgents} newly reached riders, ` +
+    `equity ${sim.equityImprovement >= 0 ? "+" : ""}${sim.equityImprovement.toFixed(1)} pts, ` +
+    `avg time saved ${sim.timeSavedMin.toFixed(1)} min.`
+  );
 }
 
 async function streamTextTurn(
@@ -457,17 +553,54 @@ async function streamTextTurn(
   return full;
 }
 
+// Planner turn. One agent bubble spanning four phases:
+//   0. demand grounding  (root cause #1 — agentic query_demand, provider-permitting)
+//   1. written analysis
+//   2. forced structured propose_route  (path-safe sorted, root cause #4)
+//   3. deterministic repair             (root cause #3)
+// 📖 Learn: the frontend resets a bubble's text on every `agent_start`, so all
+// phases stay inside a single start→end pair rather than calling streamTextTurn
+// (which emits its own agent_start).
 async function streamRouteTurn(
   config: LangGraphRunnableConfig,
   state: CouncilState,
   ag: Agent,
   prompt: string,
 ): Promise<{ full: string; route: RouteResult | null }> {
-  const full = await streamTextTurn(config, state, ag, prompt);
+  const provider = getProvider(state.providerName);
+  emit(config, { type: "agent_start", agent: ag.name, role: ag.role, color: ag.color });
+  let full = "";
+
+  // Phase 0 — demand grounding. Agentic on providers exposing a read-tool loop;
+  // skipped gracefully otherwise (Gemini today) so those routes are no worse than before.
+  if (provider.streamMessageWithReadTools) {
+    emit(config, { type: "status", text: `${ag.name} is researching real demand…` });
+    for await (const text of provider.streamMessageWithReadTools(
+      state.sessions[ag.key]!,
+      "Before proposing, ground yourself in real data. Call query_demand for the target area and any corridor or stop you are weighing — read the census population and the exact coordinates of the densest blocks it returns, plus the nearest existing stations (for transfers and the 800 m rule). Briefly note the candidate coordinates you will anchor stops to. Keep this short.",
+      DEMAND_TOOLS,
+      (name, args) => handleDemandTool(name, args, state.existingLines),
+      ag.model,
+      ag.maxTokens,
+    )) {
+      full += text;
+      emit(config, { type: "agent_text", agent: ag.name, text });
+    }
+  }
+
+  // Phase 1 — written analysis.
+  for await (const text of provider.streamMessage(state.sessions[ag.key]!, prompt, ag.model, ag.maxTokens)) {
+    full += text;
+    emit(config, { type: "agent_text", agent: ag.name, text });
+  }
+  const quote = extractQuote(full);
+  if (quote) emit(config, { type: "agent_quote", agent: ag.name, text: quote });
+
+  // Phase 2 — forced structured route. Nudged to reuse the coordinates it retrieved.
   let route: RouteResult | null = null;
-  for await (const item of getProvider(state.providerName).streamMessageWithTool(
+  for await (const item of provider.streamMessageWithTool(
     state.sessions[ag.key]!,
-    "Now call the propose_route tool with your recommended route based on your analysis above.",
+    "Now call the propose_route tool with your recommended route based on your analysis above. Reuse the exact coordinates you retrieved with query_demand wherever possible.",
     PROPOSE_ROUTE_TOOL,
     ag.model,
     ag.maxTokens,
@@ -478,6 +611,16 @@ async function streamRouteTurn(
       route = sortRouteStops(item.input);
     }
   }
+
+  // Phase 3 — deterministic repair of hard-rule violations.
+  if (route) {
+    const repaired = repairRoute(route, state.existingLines);
+    route = repaired.route;
+    if (repaired.fixes.length > 0) {
+      emit(config, { type: "status", text: `Auto-repaired ${ag.name}'s route: ${repaired.fixes.join("; ")}.` });
+    }
+  }
+
   emit(config, { type: "agent_end", agent: ag.name });
   return { full, route };
 }
@@ -527,11 +670,14 @@ async function setupNode(state: CouncilState, config: LangGraphRunnableConfig) {
 
 // When revisionCount > 0, surface the prior round's critic objections and the
 // planner's own last route so they revise from feedback instead of restarting.
-function revisionContext(state: CouncilState, ownPrior: RouteResult | null): string {
+function revisionContext(state: CouncilState, ownPrior: RouteResult | null, ownPriorSim: SimSummary | null): string {
   if (state.revisionCount === 0) return "";
   return (
     `\n\n## Revision round ${state.revisionCount}\n` +
     `Your prior route: ${routeSummary(ownPrior)}\n` +
+    // Root cause #2: feed the planner the *measured* outcome of its last route so
+    // it revises against real accessibility/equity, not just critic opinion.
+    (ownPriorSim ? `Your prior route's simulated outcome: ${formatSimForPlanner(ownPriorSim)}\n` : "") +
     `Stops both critics objected to last round: ${state.priorContested.join(", ") || "(none)"}\n` +
     (state.priorNimby ? `Margaret's objections:\n${clip(state.priorNimby, 350)}\n` : "") +
     (state.priorPr ? `Devon's objections:\n${clip(state.priorPr, 350)}\n` : "") +
@@ -546,7 +692,7 @@ async function plannerANode(state: CouncilState, config: LangGraphRunnableConfig
     agent("planner_a"),
     state.brief +
       "\n\nPropose 6–20 stations. For each, justify on merit: population density served, distance from nearest existing station, and cost contribution to total route length." +
-      revisionContext(state, state.priorRouteA),
+      revisionContext(state, state.priorRouteA, state.priorSimA),
   );
   if (route) emit(config, { type: "route_update", route, round: 1 });
   emitScoreUpdate(config, "Alex Chen", estimateRouteScore(route, state.existingLines));
@@ -560,11 +706,54 @@ async function plannerBNode(state: CouncilState, config: LangGraphRunnableConfig
     agent("planner_b"),
     state.brief +
       "\n\nPropose 6–20 stations for the most cost-efficient corridor. Cut any stop where Cost Risk exceeds Ridership ROI. Prefer direct alignments and fewer, higher-ridership stops." +
-      revisionContext(state, state.priorRouteB),
+      revisionContext(state, state.priorRouteB, state.priorSimB),
   );
   if (route) emit(config, { type: "route_update", route, round: 2 });
   emitScoreUpdate(config, "Jordan Park", estimateRouteScore(route, state.existingLines));
   return { fullB: full, routeB: route };
+}
+
+// Root cause #2: run the 150-agent simulation on both fresh proposals, surface
+// the outcome to the UI, and store it in state so critics, the commission, and
+// (on revision) the planners themselves see real accessibility/equity numbers.
+// Runs once both planners have proposed; both sims run in parallel.
+async function simNode(state: CouncilState, config: LangGraphRunnableConfig) {
+  emit(config, { type: "status", text: "Running 150-agent transit simulations…" });
+
+  // Only simulate routes that aren't badly malformed — keeps the heavy sim off
+  // junk geometry (mirrors the threshold the old non-graph council used).
+  const scoreA = estimateRouteScore(state.routeA, state.existingLines);
+  const scoreB = estimateRouteScore(state.routeB, state.existingLines);
+  const simulable = (route: RouteResult | null, score: RouteScore | null) =>
+    route !== null && (score?.hardConstraintsFailed.length ?? 99) <= 3;
+
+  const simOpts = (route: RouteResult) => ({
+    proposed: [routeToProposedLine(route as unknown as Record<string, unknown>)],
+    agentCount: 150,
+    seed: 42,
+    timeRange: { startMin: 360, endMin: 1440 },
+  });
+
+  let simA: SimSummary | null = null;
+  let simB: SimSummary | null = null;
+  try {
+    const [rawA, rawB] = await Promise.all([
+      simulable(state.routeA, scoreA) ? runSimulation(simOpts(state.routeA!)) : Promise.resolve(null),
+      simulable(state.routeB, scoreB) ? runSimulation(simOpts(state.routeB!)) : Promise.resolve(null),
+    ]);
+    if (rawA) {
+      simA = toSimSummary(rawA, state.routeA!.name);
+      emit(config, { type: "sim_update", agent: "Alex Chen", sim: simA });
+    }
+    if (rawB) {
+      simB = toSimSummary(rawB, state.routeB!.name);
+      emit(config, { type: "sim_update", agent: "Jordan Park", sim: simB });
+    }
+  } catch (err) {
+    emit(config, { type: "status", text: `Simulation skipped: ${String(err)}` });
+  }
+
+  return { simA, simB };
 }
 
 // Stash the prior round into prior* fields and clear per-round state, then send
@@ -582,8 +771,12 @@ function reviseNode(state: CouncilState, config: LangGraphRunnableConfig) {
     priorContested: state.contestedStops,
     priorRouteA: state.routeA,
     priorRouteB: state.routeB,
+    priorSimA: state.simA,
+    priorSimB: state.simB,
     routeA: null,
     routeB: null,
+    simA: null,
+    simB: null,
     nimbyVotes: null,
     prVotes: null,
     fullNimby: "",
@@ -635,6 +828,7 @@ async function nimbyNode(state: CouncilState, config: LangGraphRunnableConfig) {
     agent("nimby"),
     `Current route: ${routeSummary(currentRoute)}\n\n` +
       `Debate summary:\n${debateSummary(state)}\n\n` +
+      (state.simB ?? state.simA ? `Simulated outcome: ${formatSimForPlanner(state.simB ?? state.simA)}\n\n` : "") +
       (state.fullPr ? `Devon's PR assessment this round:\n${clip(state.fullPr, 350)}\n\n` : "") +
       `Affected areas: ${state.neighbourhoods.join(", ") || "Toronto"}.\n\n` +
       "Identify the 2–3 most disruptive stations on merit, then vote only against stops that truly require redesign.",
@@ -693,6 +887,10 @@ async function commissionNode(state: CouncilState, config: LangGraphRunnableConf
     state.brief +
       `\n\n## Debate summary\n${debateSummary(state)}\n\n` +
       `## Current route\n${routeSummary(currentRoute)}\n\n` +
+      // Root cause #5: hand the commission the exact coordinates so its binding
+      // route reuses them instead of re-inventing lat/lon from stop names.
+      `## Current route — exact coordinates (reuse these; do not invent new ones)\n${JSON.stringify(currentRoute)}\n\n` +
+      (state.simB ?? state.simA ? `## Simulated outcome\n${formatSimForPlanner(state.simB ?? state.simA)}\n\n` : "") +
       `## Remaining contested stops\n${state.contestedStops.join(", ") || "(none)"}\n\n` +
       `Approve the current route only if it is usable and defensible. Reject it if another rebuttal round is required.`,
   );
@@ -717,7 +915,7 @@ async function commissionNode(state: CouncilState, config: LangGraphRunnableConf
   if (mustFinalize) {
     for await (const item of getProvider(state.providerName).streamMessageWithTool(
       state.sessions[ag.key]!,
-      "Now call propose_route with the binding final subway route.",
+      "Now call propose_route with the binding final subway route. Reuse the exact coordinates from the current route above.",
       PROPOSE_ROUTE_TOOL,
       ag.model,
       ag.maxTokens,
@@ -726,6 +924,14 @@ async function commissionNode(state: CouncilState, config: LangGraphRunnableConf
         emit(config, { type: "agent_text", agent: ag.name, text: item.text });
       } else {
         finalRoute = sortRouteStops(item.input);
+      }
+    }
+    // Apply the same deterministic repair gate (#3) to the binding route.
+    if (finalRoute) {
+      const repaired = repairRoute(finalRoute, state.existingLines);
+      finalRoute = repaired.route;
+      if (repaired.fixes.length > 0) {
+        emit(config, { type: "status", text: `Auto-repaired final route: ${repaired.fixes.join("; ")}.` });
       }
     }
   }
@@ -766,12 +972,14 @@ function afterPlannerRouter(state: CouncilState): "plannerA" | "plannerB" {
   return state.nextPlanner ?? "plannerA";
 }
 
-function afterPlannerA(state: CouncilState): "plannerB" | "criticRouter" {
-  return state.routeB ? "criticRouter" : "plannerB";
+// Whoever proposes second routes to the simulation node; the first planner
+// hands off to the other planner. (Sim then forwards to the critic round.)
+function afterPlannerA(state: CouncilState): "plannerB" | "sim" {
+  return state.routeB ? "sim" : "plannerB";
 }
 
-function afterPlannerB(state: CouncilState): "plannerA" | "criticRouter" {
-  return state.routeA ? "criticRouter" : "plannerA";
+function afterPlannerB(state: CouncilState): "plannerA" | "sim" {
+  return state.routeA ? "sim" : "plannerA";
 }
 
 function afterCriticRouter(state: CouncilState): "nimby" | "pr" {
@@ -797,6 +1005,7 @@ const graph = new StateGraph(State)
   .addNode("plannerRouter", plannerRouterNode)
   .addNode("plannerA", plannerANode)
   .addNode("plannerB", plannerBNode)
+  .addNode("sim", simNode)
   .addNode("criticRouter", criticRouterNode)
   .addNode("nimby", nimbyNode)
   .addNode("pr", prNode)
@@ -806,8 +1015,9 @@ const graph = new StateGraph(State)
   .addEdge(START, "setup")
   .addEdge("setup", "plannerRouter")
   .addConditionalEdges("plannerRouter", afterPlannerRouter, ["plannerA", "plannerB"])
-  .addConditionalEdges("plannerA", afterPlannerA, ["plannerB", "criticRouter"])
-  .addConditionalEdges("plannerB", afterPlannerB, ["plannerA", "criticRouter"])
+  .addConditionalEdges("plannerA", afterPlannerA, ["plannerB", "sim"])
+  .addConditionalEdges("plannerB", afterPlannerB, ["plannerA", "sim"])
+  .addEdge("sim", "criticRouter")
   .addConditionalEdges("criticRouter", afterCriticRouter, ["nimby", "pr"])
   .addConditionalEdges("nimby", afterNimby, ["pr", "tally"])
   .addConditionalEdges("pr", afterPr, ["nimby", "tally"])
@@ -830,7 +1040,10 @@ export async function* runCouncilGraph(input: CouncilInput): AsyncGenerator<stri
       },
       {
         streamMode: "custom",
-        recursionLimit: 20,
+        // Raised from 20: the new sim node adds one super-step per planning round,
+        // so up to 3 rounds (MAX_REVISIONS=2) now needs more headroom before
+        // LangGraph's loop guard trips.
+        recursionLimit: 40,
       },
     )) {
       yield sse(event as Record<string, unknown>);

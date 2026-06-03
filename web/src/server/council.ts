@@ -429,7 +429,8 @@ export function shouldTerminate(
 // ── Simulation helpers ─────────────────────────────────────────────────────────
 
 // Convert raw SimulationResult to a compact, LLM-friendly summary.
-function toSimSummary(result: SimulationResult, routeName: string): SimSummary {
+// Exported so the live LangGraph council (council-graph.ts) can reuse it.
+export function toSimSummary(result: SimulationResult, routeName: string): SimSummary {
   return {
     routeName,
     baselinePctAccessible:  result.baseline.pctAccessible,
@@ -458,7 +459,8 @@ function toSimSummary(result: SimulationResult, routeName: string): SimSummary {
 }
 
 // Convert a raw route object to the ProposedLine shape expected by runSimulation.
-function routeToProposedLine(route: Record<string, unknown>): ProposedLine {
+// Exported so the live LangGraph council (council-graph.ts) can reuse it.
+export function routeToProposedLine(route: Record<string, unknown>): ProposedLine {
   const stops = route.stops as Array<{ name: string; coords: [number, number] }>;
   return {
     name:  (route.name as string)  ?? "Proposed",

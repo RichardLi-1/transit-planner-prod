@@ -73,6 +73,19 @@ export interface AIProvider {
     maxTokens?: number,
   ): AsyncGenerator<MapToolStreamChunk, void, unknown>;
 
+  // Optional READ-tool loop: the model may call any of `tools` zero or more times;
+  // each call is executed via `runTool` and the result fed back. Yields text as it
+  // reasons. Optional so providers without a tool-use loop (e.g. Gemini today) can
+  // omit it and let callers fall back to injecting data into the prompt.
+  streamMessageWithReadTools?(
+    threadId: string,
+    content: string,
+    tools: ToolDefinition[],
+    runTool: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+    model?: string,
+    maxTokens?: number,
+  ): AsyncGenerator<string, void, unknown>;
+
   // Stateless call: pass a system prompt + full message history directly.
   // Used by docs-chat, which manages its own history client-side.
   streamDirect(

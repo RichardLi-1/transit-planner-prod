@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { useAnthropic, mapToolToAnnotation } from "~/app/_components/useAnthropic";
 import { useAIAnnotations } from "./AIAnnotationsContext";
 import type { Route } from "~/app/map/transit-data";
+import { haversineKm } from "~/app/map/geo-utils";
+import { POPULATION_CENTERS } from "~/app/map/population-centers";
 
 // Compact markdown renderer for the tiny chat bubbles — responses are meant to
 // be one short sentence, so we only style the elements a brief reply might use
@@ -70,7 +72,55 @@ function getSpeechRecognitionCtor(): SpeechRecognitionConstructor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-function buildSystemPrompt(routes: Route[]): string {
+// Total great-circle length of a route in km.
+function routeLengthKm(route: Route): number {
+  let total = 0;
+  for (let i = 1; i < route.stops.length; i++) {
+    total += haversineKm(route.stops[i - 1]!.coords, route.stops[i]!.coords);
+  }
+  return total;
+}
+
+// Real coverage picture from the census population centres we ship. Used to
+// de-starve the assistant's system prompt (so it starts with situational
+// awareness instead of having to tool-call for everything) AND to ground the
+// suggestion chips in data we actually have.
+// 📖 Learn: a centre counts as "served" if ANY stop is within its serviceRadiusKm
+// (a coarse catchment model — the same one the Analysis panel's City Coverage uses).
+interface CoverageSnapshot {
+  pctPopulation: number;
+  citiesServed: number;
+  totalCities: number;
+  totalKm: number;
+  topGaps: { name: string; population: number }[];
+}
+
+function computeCoverageSnapshot(routes: Route[]): CoverageSnapshot {
+  const allStops = routes.flatMap((r) => r.stops.map((s) => s.coords));
+  const served = new Set<string>();
+  for (const c of POPULATION_CENTERS) {
+    if (allStops.some((coord) => haversineKm(coord, [c.lng, c.lat]) <= c.serviceRadiusKm)) {
+      served.add(c.id);
+    }
+  }
+  const totalPop = POPULATION_CENTERS.reduce((s, c) => s + c.population, 0);
+  const servedPop = POPULATION_CENTERS.filter((c) => served.has(c.id)).reduce((s, c) => s + c.population, 0);
+  const topGaps = POPULATION_CENTERS
+    .filter((c) => !served.has(c.id))
+    .sort((a, b) => b.population - a.population)
+    .slice(0, 5)
+    .map((c) => ({ name: c.name, population: c.population }));
+
+  return {
+    pctPopulation: totalPop > 0 ? Math.round((servedPop / totalPop) * 1000) / 10 : 0,
+    citiesServed: served.size,
+    totalCities: POPULATION_CENTERS.length,
+    totalKm: Math.round(routes.reduce((s, r) => s + routeLengthKm(r), 0)),
+    topGaps,
+  };
+}
+
+function buildSystemPrompt(routes: Route[], coverage: CoverageSnapshot): string {
   const totalStops = routes.reduce((s, r) => s + r.stops.length, 0);
   const byType: Record<string, number> = {};
   for (const r of routes) byType[r.type] = (byType[r.type] ?? 0) + 1;
@@ -79,11 +129,26 @@ function buildSystemPrompt(routes: Route[]): string {
     .map((r) => `- ${r.name} (${r.type}, ${r.stops.length} stops)`)
     .join("\n");
 
-  return `You are a transit planning assistant helping a user design and analyse a transit network.
+  const gapsLine = coverage.topGaps.length > 0
+    ? coverage.topGaps.map((g) => `${g.name} (${(g.population / 1000).toFixed(0)}k)`).join(", ")
+    : "none — every catalogued centre has service nearby";
 
-Current network summary:
-- ${routes.length} routes · ${totalStops} stops
-- By type: ${Object.entries(byType).map(([t, c]) => `${c} ${t}`).join(", ")}
+  return `You are a transit planner's MAP assistant. You answer by DRAWING on the map, not by writing essays.
+
+OUTPUT RULES (strict):
+- DRAW FIRST, talk last. Call your tools, THEN write ONE final caption of at most two short sentences describing what is now on the map. Never narrate intentions ("I'll shade…", "Let me…", "Perfect —"): just do it silently, then caption once.
+- No numbered lists, no headers, no bullet walls. Never end by asking a clarifying question — pick the best answer and draw it; the user can refine.
+- Anything you mention you MUST draw in the SAME reply: a gap → highlight_area, a corridor/route → draw_corridor, a key point → drop_pin. If you didn't draw it, don't say it.
+
+CORRIDOR GEOMETRY — draw_corridor is a STRAIGHT line from \`from\` to \`to\`, so the endpoints define the axis:
+- Name a real road? Put both endpoints ON that road. East–west roads (Highway 7, Eglinton, Steeles) → from and to share nearly the SAME latitude. North–south roads (Yonge, Hurontario, Bayview) → the SAME longitude. A diagonal line means you picked the wrong endpoints.
+- Use describe_location / query_network to fetch the REAL coordinates of each endpoint before drawing — do not guess them. For a route that bends, draw one draw_corridor per straight segment.
+
+Network context (for YOUR reasoning — do NOT recite these back as prose):
+- ${routes.length} routes · ${totalStops} stops · ${coverage.totalKm} km · ${Object.entries(byType).map(([t, c]) => `${c} ${t}`).join(", ")}
+- Reaches ~${coverage.pctPopulation}% of catalogued GTA population (${coverage.citiesServed}/${coverage.totalCities} centres)
+- Largest underserved centres: ${gapsLine}
+Use these to decide WHERE to draw. For precise spatial work, call find_coverage_gaps / describe_location / query_network.
 
 Routes (up to 20 shown):
 ${routeList}
@@ -107,7 +172,10 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
     setEditing,
     removeAnnotation,
   } = useAIAnnotations();
-  const systemPrompt = buildSystemPrompt(routes);
+  // Coverage drives both the system prompt and the suggestion chips, so compute
+  // it once. Recomputes only when the routes change.
+  const coverage = useMemo(() => computeCoverageSnapshot(routes), [routes]);
+  const systemPrompt = useMemo(() => buildSystemPrompt(routes, coverage), [routes, coverage]);
 
   const handleToolCall = useCallback(
     ({ name, args, turnId }: { name: string; args: Record<string, unknown>; turnId: string }) => {
@@ -118,10 +186,19 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
     [add],
   );
 
-  const { messages, isLoading, error, sendMessageStreaming } = useAnthropic(systemPrompt, {
+  const { messages, isLoading, error, sendMessageStreaming, reset } = useAnthropic(systemPrompt, {
     mapTools: true,
     onToolCall: handleToolCall,
+    // Persist the conversation so closing/reopening the panel (or reloading)
+    // doesn't wipe it. Cleared via the "New chat" button below.
+    persistKey: "ask-ai-chat-v1",
   });
+
+  // Start a fresh conversation: clear chat history AND the map findings it drew.
+  const handleNewChat = useCallback(() => {
+    reset();
+    clearAll();
+  }, [reset, clearAll]);
 
   const [input, setInput] = useState("");
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -162,7 +239,10 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
     if (!msg || isLoading) return;
     setInput("");
     stickToBottomRef.current = true; // always follow the user's own new message
-    await sendMessageStreaming(msg, { maxTokens: 900 });
+    // Brevity is enforced by the "draw first, no narration" prompt rules, not by
+    // starving the budget — too low a cap cut off the drawing tool calls. This
+    // leaves room to shade a gap AND draw a corridor in one turn.
+    await sendMessageStreaming(msg, { maxTokens: 600 });
   };
 
   function toggleListening() {
@@ -201,14 +281,34 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
     }
   }
 
-  const SUGGESTIONS = [
-    "Where are the network gaps?",
-    "Show me underserved areas near Yonge and Eglinton",
-    "Which stations are transfer hubs?",
-  ];
+  // Chips grounded in data we actually have: find_coverage_gaps (the >1 km
+  // threshold) and the real largest-underserved centre from the coverage
+  // snapshot. The old "transfer hubs" chip pointed at data no tool exposes.
+  const SUGGESTIONS = useMemo(() => {
+    const top = coverage.topGaps[0];
+    return [
+      "Where are the biggest coverage gaps?",
+      top ? `How could I better serve ${top.name}?` : "Which areas are over 1 km from any stop?",
+      "What share of the population does my network reach?",
+    ];
+  }, [coverage]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
+      {/* Persisted conversation → offer a way to start over. The chat itself
+          survives hide/open + reload via the persistKey above. */}
+      {messages.length > 0 && (
+        <div className="mb-2 flex shrink-0 items-center justify-between">
+          <span className="text-[10px] text-stone-400">Conversation saved</span>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            className="text-[10px] font-medium text-stone-500 hover:text-stone-800"
+          >
+            New chat
+          </button>
+        </div>
+      )}
       {annotations.length > 0 && (
         <div className="mb-2 shrink-0">
           <div className="flex items-center justify-between gap-2">
@@ -298,7 +398,7 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
                       m.role === "user" ? "text-stone-400" : "text-teal-500"
                     }`}
                   >
-                    {m.role === "user" ? "You" : "Assistant"}
+                    {m.role === "user" ? "You" : "Transit Planner"}
                   </p>
                   {/* Assistant replies may contain markdown; user input stays literal. */}
                   {m.role === "assistant" ? (
@@ -350,7 +450,7 @@ export function TransitAssistant({ routes, seed, onSeedConsumed }: Props) {
         )}
         {isLoading && (
           <div className="bg-stone-50 border border-stone-100 rounded-lg px-2.5 py-2 mr-6">
-            <p className="text-[9px] font-semibold text-teal-500 mb-0.5">Assistant</p>
+            <p className="text-[9px] font-semibold text-teal-500 mb-0.5">Transit Planner</p>
             <div className="flex gap-1 items-center h-4">
               <span className="h-1.5 w-1.5 rounded-full bg-stone-300 animate-bounce" style={{ animationDelay: "0ms" }} />
               <span className="h-1.5 w-1.5 rounded-full bg-stone-300 animate-bounce" style={{ animationDelay: "150ms" }} />

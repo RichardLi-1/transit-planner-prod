@@ -399,6 +399,10 @@ export function TransitMap() {
   const [showStationLabels, setShowStationLabels] = useState(false);
   const [showSimPanel, setShowSimPanel] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
+  // Whether the free-form "Ask AI" entry point is surfaced at all. Hidden by
+  // default; opt-in via the Settings menu. Distinct from `showAIChat`, which is
+  // whether the chat panel is currently *open*.
+  const [showAskAIButton, setShowAskAIButton] = useState(false);
   // Right-click context menu — fires when the user right-clicks on the map.
   // `x` and `y` are CSS pixel coordinates relative to the viewport so we can
   // position the menu directly at the cursor.
@@ -808,6 +812,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     setDarkMode(stored !== null ? stored === "1" : window.matchMedia("(prefers-color-scheme: dark)").matches);
     setHighContrast(get("highContrast"));
     setShowStationLabels(get("t_showStationLabels"));
+    setShowAskAIButton(get("t_showAskAI")); // absent → false → button stays hidden
     const storedProvider = localStorage.getItem("aiProvider");
     if (storedProvider === "gemini") setAiProvider("gemini");
 
@@ -828,6 +833,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
   useEffect(() => { localStorage.setItem("t_randomizeSpeakingOrder", randomizeSpeakingOrder ? "1" : "0"); }, [randomizeSpeakingOrder]);
   useEffect(() => { localStorage.setItem("t_imperial", imperial ? "1" : "0"); }, [imperial]);
   useEffect(() => { localStorage.setItem("aiProvider", aiProvider); }, [aiProvider]);
+  useEffect(() => { localStorage.setItem("t_showAskAI", showAskAIButton ? "1" : "0"); }, [showAskAIButton]);
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -4433,7 +4439,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
 
         {/* Ask AI button — opens free-form chat without requiring map selection.
             For the Council deliberation workflow, users still select neighbourhoods
-            on the map and click "Generate Route". This is the conversational entry point. */}
+            on the map and click "Generate Route". This is the conversational entry point.
+            Hidden unless opted in via Settings → "Ask AI". */}
+        {showAskAIButton && (
         <button
           onClick={() => setShowAIChat((v) => !v)}
           className={`pointer-events-auto flex h-13 items-center gap-2.5 rounded-xl border bg-white px-5 text-base font-normal shadow-sm transition-all ${
@@ -4446,6 +4454,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           Ask AI
           <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 uppercase tracking-wide">beta</span>
         </button>
+        )}
 
         {/* Draw toolbar — wrapped in relative so the badge can anchor to it */}
         <div className="relative">
@@ -4663,7 +4672,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onClose={() => { setShowSimPanel(false); setSimResults(null); setAnimAgents(null); }}
           onResults={(r) => { setSimResults(r); setAnimAgents(null); }}
           onAnimate={(agents) => setAnimAgents(agents)}
-          onAskAI={(seg) => {
+          onAskAI={!showAskAIButton ? undefined : (seg) => {
             // Build a concrete, context-rich seed so the assistant has the
             // numbers it needs without the user re-typing them.
             const stress = Math.round(seg.stress_pct);
@@ -4717,8 +4726,9 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
       )}
 
       {/* Map right-click context menu. Positioned at the cursor; closes on
-          outside-click via the map listeners installed above, or on Escape. */}
-      {mapCtxMenu && (
+          outside-click via the map listeners installed above, or on Escape.
+          Only meaningful when Ask AI is enabled — its sole action is "Ask AI about here". */}
+      {mapCtxMenu && showAskAIButton && (
         <div
           className="pointer-events-auto fixed z-40 min-w-44 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg"
           style={{ left: Math.min(mapCtxMenu.x, window.innerWidth - 200), top: Math.min(mapCtxMenu.y, window.innerHeight - 80) }}
@@ -5212,6 +5222,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   ["High contrast", highContrast, () => setHighContrast((v) => !v), false],
                   ["Imperial units", imperial, () => setImperial((v) => !v), false],
                   ["Analysis panel", advancedMode, () => { const next = !advancedMode; setAdvancedMode(next); setExperimentalFeatures(next); }, false],
+                  ["Ask AI", showAskAIButton, () => setShowAskAIButton((v) => !v), true],
                   ["GO Transit", showGoTrain, () => setShowGoTrain((v) => !v), true],
                 ] as [string, boolean, () => void, boolean][]).map(([label, on, toggle, beta]) => (
                   <button key={label} onClick={toggle} className="flex w-full items-center justify-between px-4 py-2 text-sm text-stone-600 hover:bg-stone-50 transition-colors">
