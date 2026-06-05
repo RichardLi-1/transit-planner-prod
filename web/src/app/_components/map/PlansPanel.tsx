@@ -1,9 +1,63 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+
+function InlineSaveForm({ onConfirm, onCancel }: { onConfirm: (name: string) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  async function handleConfirm() {
+    const trimmed = name.trim();
+    if (!trimmed || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onConfirm(trimmed);
+    } catch {
+      setError("Failed to save. Try again.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs font-medium text-stone-500 dark:text-stone-400">Name this plan</p>
+      <input
+        ref={inputRef}
+        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none placeholder-stone-400 transition-colors focus:border-stone-400 dark:border-white/10 dark:bg-[#28282a] dark:text-white dark:placeholder-stone-500 dark:focus:border-stone-500"
+        placeholder="Plan name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void handleConfirm();
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={onCancel}
+          className="flex-1 rounded-lg border border-stone-200 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-50 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/5"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => void handleConfirm()}
+          disabled={!name.trim() || saving}
+          className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-100"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
 import type { Route } from "~/app/map/transit-data";
 import type { PlanSession, PlanSessionSummary } from "~/lib/plans";
-import { SavePlanModal } from "./SavePlanModal";
 
 type PlansPanelProps = {
   open: boolean;
@@ -40,7 +94,6 @@ export function PlansPanel({
   const [editingName, setEditingName] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [saveAsNew, setSaveAsNew] = useState(false);
 
   const fetchPlans = useCallback(async () => {
     if (!authUser) return;
@@ -76,7 +129,6 @@ export function PlansPanel({
 
   async function handleSaveInPlace() {
     if (!currentPlanId) {
-      setSaveAsNew(false);
       setShowSaveModal(true);
       return;
     }
@@ -330,54 +382,52 @@ export function PlansPanel({
 
             {/* Footer */}
             <div className="shrink-0 border-t border-stone-100 px-4 py-3 dark:border-white/5">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => void handleSaveInPlace()}
-                  disabled={isSaving}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all disabled:opacity-50 ${
-                    planIsDirty && currentPlanId
-                      ? "bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
-                      : "bg-stone-900 text-white hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-100"
-                  }`}
-                >
-                  {isSaving ? (
-                    <>
-                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      Saving…
-                    </>
-                  ) : (
-                    <>
-                      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M13 11v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2M8 2v8M5 7l3 3 3-3"/>
-                      </svg>
-                      Save
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => { setSaveAsNew(true); setShowSaveModal(true); }}
-                  className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-50 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/5"
-                  title="Save as new plan"
-                >
-                  <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M8 3v10M3 8h10"/>
-                  </svg>
-                  New
-                </button>
-              </div>
+              {showSaveModal ? (
+                <InlineSaveForm
+                  onConfirm={handleConfirmSave}
+                  onCancel={() => setShowSaveModal(false)}
+                />
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void handleSaveInPlace()}
+                    disabled={isSaving}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all disabled:opacity-50 ${
+                      planIsDirty && currentPlanId
+                        ? "bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                        : "bg-stone-900 text-white hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-100"
+                    }`}
+                  >
+                    {isSaving ? (
+                      <>
+                        <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        Saving…
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M13 11v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2M8 2v8M5 7l3 3 3-3"/>
+                        </svg>
+                        Save
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowSaveModal(true)}
+                    className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-50 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/5"
+                    title="Save as new plan"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M8 3v10M3 8h10"/>
+                    </svg>
+                    New
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
-
-      {/* Save modal */}
-      {showSaveModal && (
-        <SavePlanModal
-          initialName={saveAsNew ? "" : (plans.find((p) => p.id === currentPlanId)?.name ?? "")}
-          onConfirm={handleConfirmSave}
-          onClose={() => { setShowSaveModal(false); setSaveAsNew(false); }}
-        />
-      )}
     </>
   );
 }
