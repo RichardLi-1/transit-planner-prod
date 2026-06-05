@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { Route } from "~/app/map/transit-data";
+import type { PlanSession, PlanSessionSummary } from "~/lib/plans";
 
 function InlineSaveForm({ onConfirm, onCancel }: { onConfirm: (name: string) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState("");
@@ -56,8 +58,6 @@ function InlineSaveForm({ onConfirm, onCancel }: { onConfirm: (name: string) => 
     </div>
   );
 }
-import type { Route } from "~/app/map/transit-data";
-import type { PlanSession, PlanSessionSummary } from "~/lib/plans";
 
 type PlansPanelProps = {
   open: boolean;
@@ -71,6 +71,7 @@ type PlansPanelProps = {
   onPlanLoaded: (routes: Route[], hiddenRoutes: Set<string>, planId: string) => void;
   onCurrentPlanIdChange: (id: string | null) => void;
   onMarkSaved: (savedRoutes: Route[]) => void;
+  onNewPlan: () => void;
   darkMode: boolean;
 };
 
@@ -86,6 +87,7 @@ export function PlansPanel({
   onPlanLoaded,
   onCurrentPlanIdChange,
   onMarkSaved,
+  onNewPlan,
 }: PlansPanelProps) {
   const [plans, setPlans] = useState<PlanSessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -173,9 +175,6 @@ export function PlansPanel({
         body: JSON.stringify({ name: trimmed }),
       });
       if (res.ok) {
-        if (planId === currentPlanId) {
-          // name changed but routes unchanged — still clean
-        }
         await fetchPlans();
       }
     } finally {
@@ -198,18 +197,41 @@ export function PlansPanel({
     }
   }
 
+  function handleNewPlan() {
+    if (planIsDirty && !window.confirm("You have unsaved changes. Start a new blank plan anyway?")) return;
+    onNewPlan();
+  }
+
   const isSaving = actionLoading === "saving";
+  const currentPlanName = plans.find((p) => p.id === currentPlanId)?.name;
+
+  // Footer save button label
+  const saveLabel = currentPlanId
+    ? currentPlanName ? `Update "${currentPlanName}"` : "Save changes"
+    : "Save new plan";
 
   return (
     <>
       <div className="flex h-full w-72 flex-col rounded-xl border border-[#D7D7D7] bg-white shadow-sm dark:border-white/10 dark:bg-[#1c1c1e]">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 pb-3 pt-4 dark:border-white/5">
-          <div className="flex items-center gap-2">
-            <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 shrink-0 text-stone-500 dark:text-stone-400" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <div className="flex shrink-0 items-start justify-between border-b border-stone-100 px-4 pb-3 pt-4 dark:border-white/5">
+          <div className="flex items-start gap-2">
+            <svg viewBox="0 0 16 16" fill="none" className="mt-0.5 h-4 w-4 shrink-0 text-stone-500 dark:text-stone-400" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 2h10a1 1 0 0 1 1 1v10l-3-2-2 2-2-2-3 2V3a1 1 0 0 1 1-1z"/>
             </svg>
-            <span className="text-sm font-semibold text-stone-800 dark:text-stone-100">My Plans</span>
+            <div>
+              <span className="text-sm font-semibold text-stone-800 dark:text-stone-100">My Plans</span>
+              <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
+                {currentPlanId
+                  ? currentPlanName
+                    ? <>Editing <span className="font-medium text-stone-600 dark:text-stone-300">{currentPlanName}</span>{planIsDirty ? " · unsaved" : ""}</>
+                    : "Editing saved plan"
+                  : planIsDirty
+                    ? <span className="text-amber-500">Unsaved plan</span>
+                    : "No plan open"
+                }
+              </p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -307,45 +329,51 @@ export function PlansPanel({
                               />
                             ) : (
                               <div>
-                                <button
-                                  onClick={() => void handleLoad(plan.id)}
-                                  disabled={isActing}
-                                  className="block max-w-full truncate text-left text-sm font-medium text-stone-700 transition-colors hover:text-indigo-600 disabled:opacity-50 dark:text-stone-200 dark:hover:text-indigo-400"
-                                  title={plan.name}
-                                >
+                                <p className="truncate text-sm font-medium text-stone-700 dark:text-stone-200" title={plan.name}>
                                   {plan.name}
-                                </button>
+                                </p>
                                 <p className="text-xs text-stone-400 dark:text-stone-500">
                                   {plan.routeCount} line{plan.routeCount !== 1 ? "s" : ""}
                                   {isActive && planIsDirty && (
-                                    <span className="ml-1.5 text-amber-500">· unsaved changes</span>
+                                    <span className="ml-1.5 text-amber-500">· unsaved</span>
                                   )}
                                 </p>
                               </div>
                             )}
                           </div>
 
-                          {/* Actions (pencil + trash) */}
+                          {/* Actions */}
                           {!isEditing && !isActing && (
-                            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                              <button
-                                onClick={() => { setEditingId(plan.id); setEditingName(plan.name); }}
-                                className="flex h-6 w-6 items-center justify-center rounded text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-white/10 dark:hover:text-stone-300"
-                                title="Rename"
-                              >
-                                <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M11 2l3 3-8 8H3v-3l8-8z"/>
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => setConfirmDeleteId(plan.id)}
-                                className="flex h-6 w-6 items-center justify-center rounded text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-                                title="Delete"
-                              >
-                                <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2 4h12M6 4V2h4v2M5 4v9a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V4"/>
-                                </svg>
-                              </button>
+                            <div className="flex shrink-0 items-center gap-0.5">
+                              {/* Open button — always visible for inactive plans */}
+                              {!isActive && (
+                                <button
+                                  onClick={() => void handleLoad(plan.id)}
+                                  className="rounded px-2 py-0.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-500/10"
+                                >
+                                  Open
+                                </button>
+                              )}
+                              <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                                <button
+                                  onClick={() => { setEditingId(plan.id); setEditingName(plan.name); }}
+                                  className="flex h-6 w-6 items-center justify-center rounded text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-white/10 dark:hover:text-stone-300"
+                                  title="Rename"
+                                >
+                                  <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 2l3 3-8 8H3v-3l8-8z"/>
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(plan.id)}
+                                  className="flex h-6 w-6 items-center justify-center rounded text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                                  title="Delete"
+                                >
+                                  <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M2 4h12M6 4V2h4v2M5 4v9a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V4"/>
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -391,12 +419,13 @@ export function PlansPanel({
                 <div className="flex gap-2">
                   <button
                     onClick={() => void handleSaveInPlace()}
-                    disabled={isSaving}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all disabled:opacity-50 ${
+                    disabled={isSaving || (!planIsDirty && !!currentPlanId)}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all disabled:opacity-40 ${
                       planIsDirty && currentPlanId
                         ? "bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
                         : "bg-stone-900 text-white hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-100"
                     }`}
+                    title={saveLabel}
                   >
                     {isSaving ? (
                       <>
@@ -405,17 +434,17 @@ export function PlansPanel({
                       </>
                     ) : (
                       <>
-                        <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M13 11v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2M8 2v8M5 7l3 3 3-3"/>
                         </svg>
-                        Save
+                        <span className="truncate">{saveLabel}</span>
                       </>
                     )}
                   </button>
                   <button
-                    onClick={() => setShowSaveModal(true)}
+                    onClick={handleNewPlan}
                     className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-50 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/5"
-                    title="Save as new plan"
+                    title="New blank plan"
                   >
                     <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8 3v10M3 8h10"/>

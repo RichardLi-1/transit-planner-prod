@@ -1719,6 +1719,16 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
     setShowPlansPanel(false);
   }
 
+  function handleNewPlan() {
+    snapshotHistory();
+    setRoutes([]);
+    routesRef.current = [];
+    setHiddenRoutes(new Set());
+    setCurrentPlanId(null);
+    lastSavedRoutesRef.current = [];
+    setShowPlansPanel(false);
+  }
+
   function copyShareLink() {
     const center = mapRef.current?.getCenter().toArray() as [number, number] | undefined;
     const zoom = mapRef.current?.getZoom();
@@ -4708,6 +4718,7 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           onPlanLoaded={handleLoadPlan}
           onCurrentPlanIdChange={setCurrentPlanId}
           onMarkSaved={(r) => { lastSavedRoutesRef.current = r; }}
+          onNewPlan={handleNewPlan}
           darkMode={darkMode}
         />
       </div>
