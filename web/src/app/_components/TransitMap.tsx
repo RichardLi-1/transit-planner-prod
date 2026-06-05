@@ -5368,18 +5368,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
                   </svg>
                   Give feedback
                 </button>
-                <a
-                  href="https://github.com/evanzyang91/transit-planner/issues/new?labels=bug&title=[Bug]+"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex w-full items-center gap-3 px-4 py-2 text-sm text-stone-500 hover:bg-stone-50 hover:text-stone-700 transition-colors"
-                  onClick={() => setShowSettingsMenu(false)}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="8" cy="8" r="6" /><path d="M8 5v3M8 10.5v.5" strokeWidth="1.8" />
-                  </svg>
-                  Report a bug
-                </a>
               </div>
             </div>
           )}
