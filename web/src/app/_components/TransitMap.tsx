@@ -349,13 +349,12 @@ export function TransitMap() {
   const { showTransitDesert, setShowTransitDesert, isComputing: desertComputing } = useTransitDesert(mapRef, mapLoaded, popRawData, routes);
   const { handleIsochroneOriginPicking, isoMode, setIsoMode, pickingIsochroneOrigin, setIsochroneMinutes, setIsochroneOrigin, isochroneOrigin, isochroneMinutes, setPickingIsochroneOrigin} = useIsochrone(mapRef, mapLoaded, TOKEN);
 
-  // Voronoi: assign each population point to its nearest station
-  // Cutoff: 5 km for subway/LRT, 1 km for streetcar/bus
+  // Walking-catchment radius: 800m for subway/LRT (10-min walk), 500m for streetcar/bus (6-min walk)
   const stationPopulations = useMemo(() => {
     if (popRawData.length === 0) return new Map<string, number>();
     const allStops: { name: string; coords: [number, number]; maxKm: number }[] = [];
     const seen = new Set<string>();
-    const cutoff = (type: Route["type"]) => (type === "streetcar" || type === "bus" ? 1 : 5);
+    const cutoff = (type: Route["type"]) => (type === "streetcar" || type === "bus" ? 0.5 : 0.8);
     const addStop = (stop: { name: string; coords: [number, number] }, type: Route["type"]) => {
       const key = `${stop.name}@${stop.coords[0]},${stop.coords[1]}`;
       if (!seen.has(key)) { seen.add(key); allStops.push({ ...stop, maxKm: cutoff(type) }); }

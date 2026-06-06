@@ -24,10 +24,11 @@ export function haversineKm(
 }
 
 /**
- * Voronoi + cutoff: assign each population point to its single nearest station.
- * Points farther than the station's `maxKm` are excluded.
+ * Walking-catchment: assign each population point to every station within
+ * that station's walking radius. A single census block can count toward
+ * multiple stations (intentional — each station competes for nearby riders).
  *
- * @returns Map from station name → total population assigned to it
+ * @returns Map from station name → total population within walking distance
  */
 export function computeStationPopulations(
   rows: PopRow[],
@@ -38,17 +39,10 @@ export function computeStationPopulations(
 
   for (const row of rows) {
     const pt: [number, number] = [row.longitude, row.latitude];
-    let bestDist = Infinity;
-    let bestStation: { name: string; maxKm: number } | null = null;
     for (const s of stations) {
-      const d = haversineKm(pt, s.coords);
-      if (d < bestDist) {
-        bestDist = d;
-        bestStation = s;
+      if (haversineKm(pt, s.coords) <= s.maxKm) {
+        result.set(s.name, (result.get(s.name) ?? 0) + row.population);
       }
-    }
-    if (bestStation && bestDist <= bestStation.maxKm) {
-      result.set(bestStation.name, (result.get(bestStation.name) ?? 0) + row.population);
     }
   }
   return result;

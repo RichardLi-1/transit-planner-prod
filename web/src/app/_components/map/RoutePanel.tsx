@@ -112,7 +112,7 @@ export function RoutePanel({
       ? scoreStation(selectedStop, route, allRoutes, stationPopulations)
       : null;
   const rawPop = selectedStop ? stationPopulations.get(selectedStop) : undefined;
-  const popServed = rawPop !== undefined ? Math.max(2314, rawPop) : undefined;
+  const popServed = rawPop !== undefined ? rawPop : undefined;
   const allStops = route.stops;
   const isCustomLine = !!onDeleteLine;
 
@@ -186,7 +186,7 @@ export function RoutePanel({
         <div className="mx-5 mt-0 rounded-xl bg-stone-50 px-4 py-3">
           <p className="text-xs font-semibold text-stone-500">Population Served{transferRoutes.length > 0 ? " (combined)" : ""}</p>
           <p className="mt-1 text-2xl font-bold text-stone-800">{popServed.toLocaleString()}</p>
-          <p className="text-[11px] text-stone-400">Nearest-station assignment, {route.type === "streetcar" || route.type === "bus" ? "1" : "5"} km cutoff</p>
+          <p className="text-[11px] text-stone-400">Within {route.type === "streetcar" || route.type === "bus" ? "500m" : "800m"} walking distance</p>
         </div>
       )}
 
