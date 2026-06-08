@@ -4920,7 +4920,6 @@ function getAnalyticsContext(routeList: Route[] = routesRef.current) {
           <StationPopup
             popup={stationPopup}
             allRoutes={generatedRoute ? [...routes, generatedRoute] : routes}
-            stationPopulations={stationPopulations}
             isDeletable={isCustom}
             connectedRoutes={
               routes.filter((r) => {

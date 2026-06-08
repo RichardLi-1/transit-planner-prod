@@ -2,12 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Route } from "~/app/map/transit-data";
-import { useStationSummary } from "../useStationSummary";
 
 export function StationPopup({
   popup,
   allRoutes,
-  stationPopulations,
   isDeletable,
   connectedRoutes,
   pedestrianConnections = [],
@@ -20,7 +18,6 @@ export function StationPopup({
 }: {
   popup: { name: string; routeId: string; x: number; y: number; coords?: [number, number] };
   allRoutes: Route[];
-  stationPopulations: Map<string, number>;
   isDeletable: boolean;
   connectedRoutes: Route[];
   pedestrianConnections?: { route: Route; stopName: string }[];
@@ -35,14 +32,7 @@ export function StationPopup({
   const connectedIds = new Set(connectedRoutes.map((r) => r.id));
   const transferableRoutes = allRoutes.filter((r) => r.id !== popup.routeId && !connectedIds.has(r.id));
   
-  // Get population served from the pre-computed stationPopulations (Voronoi method, 1km cutoff for streetcar/bus, 5km for subway/LRT)
-  const rawPopulationServed = stationPopulations.get(popup.name);
-  const populationServed = rawPopulationServed !== undefined ? Math.max(2314, rawPopulationServed) : undefined;
-  
-  // Estimate ridership as ~15% of population served
-  const ridership = populationServed !== undefined ? Math.round(populationServed * 0.15) : undefined;
-  
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
+const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Inline rename state
   const [isRenaming, setIsRenaming] = useState(false);
@@ -68,11 +58,6 @@ export function StationPopup({
     if (isRenaming) renameInputRef.current?.select();
   }, [isRenaming]);
 
-  // AI Summary hook
-  const { getSummary, isLoading: isSummaryLoading, getCachedSummary } = useStationSummary();
-  const [summary, setSummary] = useState<string>("");
-  const [showSummary, setShowSummary] = useState(false);
-
   // Flip popup below the point if it would be cropped at the top
   const popupRef = useRef<HTMLDivElement>(null);
   const [flipDown, setFlipDown] = useState(false);
@@ -82,36 +67,7 @@ export function StationPopup({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     setFlipDown(rect.top < 8);
-  }, [popup.x, popup.y, showSummary]);
-
-  // Collect all stations for comparison
-  const allStations = allRoutes.flatMap(route => 
-    route.stops.map(stop => {
-      const pop = stationPopulations.get(stop.name);
-      return {
-        name: stop.name,
-        ridership: pop !== undefined ? Math.round(Math.max(2314, pop) * 0.15) : undefined
-      };
-    })
-  );
-
-  useEffect(() => {
-    if (showSummary && !summary && !isSummaryLoading(popup.name, currentRoute?.name ?? "")) {
-      const cached = getCachedSummary(popup.name, currentRoute?.name ?? "");
-      if (cached) {
-        setSummary(cached);
-      } else {
-        void getSummary({
-          stationName: popup.name,
-          routeName: currentRoute?.name ?? popup.routeId,
-          ridership,
-          populationServed,
-          connections: connectedRoutes.map(r => r.name),
-          allStations,
-        }).then(setSummary).catch(console.error);
-      }
-    }
-  }, [showSummary, popup.name, currentRoute, ridership, populationServed, connectedRoutes, allStations, getSummary, getCachedSummary, isSummaryLoading, summary]);
+  }, [popup.x, popup.y]);
 
   return (
     <div
@@ -211,65 +167,6 @@ export function StationPopup({
         )}
       </div>
 
-      {/* AI Summary Section */}
-      <div className="mb-2 border-t border-stone-100 pt-2">
-        <button
-          onClick={() => setShowSummary(!showSummary)}
-          className="flex w-full items-center justify-between text-left text-xs font-medium text-stone-600 hover:text-stone-800 transition-colors"
-        >
-          <span className="flex items-center gap-1.5">
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-            AI Station Analysis
-          </span>
-          <svg 
-            className={`h-3 w-3 transition-transform ${showSummary ? 'rotate-180' : ''}`}
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor" 
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        
-        {showSummary && (
-          <div className="mt-2 rounded-lg bg-stone-50 p-2.5">
-            <div className="mb-1.5 space-y-1 text-[10px] text-stone-500">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold">Population Served:</span>
-                {populationServed !== undefined ? (
-                  <span>{populationServed.toLocaleString()} people (nearest-station, {currentRoute?.type === "streetcar" || currentRoute?.type === "bus" ? "1" : "5"}km cutoff)</span>
-                ) : (
-                  <span className="text-stone-400">Data unavailable</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold">Est. Daily Ridership:</span>
-                {ridership !== undefined ? (
-                  <span>{ridership.toLocaleString()} passengers</span>
-                ) : (
-                  <span className="text-stone-400">Data unavailable</span>
-                )}
-              </div>
-            </div>
-            {isSummaryLoading(popup.name, currentRoute?.name ?? "") ? (
-              <div className="flex items-center gap-2 text-xs text-stone-500">
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span>Analyzing station data...</span>
-              </div>
-            ) : summary ? (
-              <p className="max-h-40 overflow-y-auto text-xs leading-relaxed text-stone-700">{summary}</p>
-            ) : (
-              <p className="text-xs text-stone-500 italic">Click to generate analysis</p>
-            )}
-          </div>
-        )}
-      </div>
 
       {connectedRoutes.length > 0 && (
         <div className="mb-2">
